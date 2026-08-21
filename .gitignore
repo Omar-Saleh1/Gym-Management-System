@@ -1,0 +1,9 @@
+﻿node_modules/
+dist/
+.env
+*.env
+.wwebjs_auth/
+.wwebjs_cache/
+uploads/products/*
+!uploads/products/.gitkeep
+*.log

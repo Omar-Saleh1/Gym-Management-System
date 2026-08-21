@@ -1,0 +1,304 @@
+{
+  "info": {
+    "name": "Gym System API",
+    "description": "جميع مسارات برمجة التطبيقات (API) الخاصة بنظام إدارة الجيم",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "YOUR_BEARER_TOKEN_HERE",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Register Cashier/Admin",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Admin Name\",\n  \"username\": \"admin\",\n  \"password\": \"123\",\n  \"role\": \"admin\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] }
+          }
+        },
+        {
+          "name": "Get Current User (Me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/auth/me", "host": ["{{base_url}}"], "path": ["auth", "me"] }
+          }
+        },
+        {
+          "name": "Get All Cashiers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/auth/cashiers", "host": ["{{base_url}}"], "path": ["auth", "cashiers"] }
+          }
+        },
+        {
+          "name": "Update Cashier",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New Name\",\n  \"role\": \"cashier\",\n  \"active\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/auth/cashiers/:id", "host": ["{{base_url}}"], "path": ["auth", "cashiers", ":id"], "variable": [{ "key": "id", "value": "ID_HERE" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Members",
+      "item": [
+        {
+          "name": "Get All Members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/members?search=",
+              "host": ["{{base_url}}"],
+              "path": ["members"],
+              "query": [{ "key": "search", "value": "", "description": "Optional search by name or phone" }]
+            }
+          }
+        },
+        {
+          "name": "Get Member By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/members/:id", "host": ["{{base_url}}"], "path": ["members", ":id"], "variable": [{ "key": "id", "value": "ID_HERE" }] }
+          }
+        },
+        {
+          "name": "Create Member",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ahmed\",\n  \"phone\": \"01000000000\",\n  \"email\": \"ahmed@example.com\",\n  \"gender\": \"male\",\n  \"address\": \"Cairo\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/members", "host": ["{{base_url}}"], "path": ["members"] }
+          }
+        },
+        {
+          "name": "Update Member",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ahmed Updated\",\n  \"phone\": \"01000000000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/members/:id", "host": ["{{base_url}}"], "path": ["members", ":id"], "variable": [{ "key": "id", "value": "ID_HERE" }] }
+          }
+        },
+        {
+          "name": "Delete Member",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/members/:id", "host": ["{{base_url}}"], "path": ["members", ":id"], "variable": [{ "key": "id", "value": "ID_HERE" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Subscriptions",
+      "item": [
+        {
+          "name": "Get Plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/subscriptions/plans", "host": ["{{base_url}}"], "path": ["subscriptions", "plans"] }
+          }
+        },
+        {
+          "name": "Create Plan",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Monthly\",\n  \"durationInDays\": 30,\n  \"price\": 500,\n  \"description\": \"Standard monthly plan\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/subscriptions/plans", "host": ["{{base_url}}"], "path": ["subscriptions", "plans"] }
+          }
+        },
+        {
+          "name": "Get Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/subscriptions?expiringSoon=false",
+              "host": ["{{base_url}}"],
+              "path": ["subscriptions"],
+              "query": [{ "key": "expiringSoon", "value": "false" }]
+            }
+          }
+        },
+        {
+          "name": "Create Subscription",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"MEMBER_ID\",\n  \"planId\": \"PLAN_ID\",\n  \"paymentMethod\": \"cash\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/subscriptions", "host": ["{{base_url}}"], "path": ["subscriptions"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Products",
+      "item": [
+        {
+          "name": "Get Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/products", "host": ["{{base_url}}"], "path": ["products"] }
+          }
+        },
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Water\",\n  \"category\": \"Drinks\",\n  \"price\": 10,\n  \"costPrice\": 5,\n  \"stock\": 100\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/products", "host": ["{{base_url}}"], "path": ["products"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Sales",
+      "item": [
+        {
+          "name": "Create Sale",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"PRODUCT_ID\", \"quantity\": 2 }\n  ],\n  \"paymentMethod\": \"cash\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/sales", "host": ["{{base_url}}"], "path": ["sales"] }
+          }
+        },
+        {
+          "name": "Get Sales",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/sales", "host": ["{{base_url}}"], "path": ["sales"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Attendance",
+      "item": [
+        {
+          "name": "Scan QR Code",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"MEMBER_ID\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/attendance/scan", "host": ["{{base_url}}"], "path": ["attendance", "scan"] }
+          }
+        },
+        {
+          "name": "Get Attendance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/attendance", "host": ["{{base_url}}"], "path": ["attendance"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Reports",
+      "item": [
+        {
+          "name": "Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/reports/dashboard", "host": ["{{base_url}}"], "path": ["reports", "dashboard"] }
+          }
+        },
+        {
+          "name": "Sales Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/reports/sales", "host": ["{{base_url}}"], "path": ["reports", "sales"] }
+          }
+        }
+      ]
+    }
+  ]
+}
