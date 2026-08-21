@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 
 
 export interface IMember extends Document {
@@ -28,7 +28,7 @@ const memberSchema = new Schema<IMember>(
     photo:       { type: String },
     notes:       { type: String },
     active:      { type: Boolean, default: true },
-    qrToken:     { type: String, unique: true, default: () => `GYM-${uuidv4().slice(0, 10).toUpperCase()}` },
+    qrToken:     { type: String, unique: true, default: () => `GYM-${crypto.randomUUID().slice(0, 10).toUpperCase()}` },
   },
   { timestamps: true }
 );
