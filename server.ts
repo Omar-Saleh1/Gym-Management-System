@@ -14,6 +14,7 @@ import saleRoutes          from './routes/saleRoutes';
 import attendanceRoutes    from './routes/attendanceRoutes';
 import reportRoutes        from './routes/reportRoutes';
 import notificationRoutes  from './routes/notificationRoutes';
+import whatsappRoutes      from './routes/whatsappRoutes';
 
 const app: Application = express();
 
@@ -45,6 +46,7 @@ app.use('/api/sales',         saleRoutes);
 app.use('/api/attendance',    attendanceRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/whatsapp',      whatsappRoutes);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);
@@ -55,5 +57,10 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   initScheduler();         // start daily cron jobs
-  initWhatsAppClient();    // start WhatsApp local session
+  // Fire-and-forget — WhatsApp init is async and must not block HTTP or crash the server
+  try {
+    initWhatsAppClient();
+  } catch (err) {
+    console.error('[WhatsApp] Failed to start client bootstrap:', err);
+  }
 });
