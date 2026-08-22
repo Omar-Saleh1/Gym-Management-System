@@ -96,17 +96,18 @@ export function getLatestQrDataUrl(): string | null {
 // ─── Puppeteer config (Docker / Render) ──────────────────────────────────────
 
 function getExecutablePath(): string | undefined {
+  // On Render/Docker: the base image sets PUPPETEER_EXECUTABLE_PATH automatically.
+  // On Windows dev: point to system Chrome.
+  // On other Linux (non-Docker): let puppeteer auto-detect.
   if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
   if (process.platform === 'win32') {
     return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   }
-  if (process.platform === 'linux') {
-    return '/usr/bin/google-chrome-stable';
-  }
-  return undefined;
+  return undefined; // puppeteer will auto-detect on Linux
 }
 
 function buildWebVersionOptions(): Pick<ConstructorParameters<typeof Client>[0], 'webVersion' | 'webVersionCache'> {
+  // If caller explicitly passed a URL → use it as remote path
   if (WA_WEB_VERSION?.startsWith('http')) {
     return {
       webVersionCache: {
@@ -117,6 +118,7 @@ function buildWebVersionOptions(): Pick<ConstructorParameters<typeof Client>[0],
     };
   }
 
+  // If caller passed a specific version string → fetch from wppconnect cache
   if (WA_WEB_VERSION) {
     return {
       webVersion: WA_WEB_VERSION,
@@ -128,11 +130,13 @@ function buildWebVersionOptions(): Pick<ConstructorParameters<typeof Client>[0],
     };
   }
 
+  // Default: let whatsapp-web.js pick its built-in version,
+  // fetch from wppconnect-team remote cache (avoids stale hardcoded HTML).
+  // strict:false means it falls back gracefully if the remote fetch fails.
   return {
-    webVersion: DEFAULT_WEB_VERSION,
     webVersionCache: {
-      type: 'local',
-      path: CACHE_DATA_PATH,
+      type: 'remote',
+      remotePath: WA_REMOTE_CACHE_URL,
       strict: false,
     },
   };
