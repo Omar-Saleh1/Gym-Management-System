@@ -159,6 +159,7 @@ function buildClientOptions() {
         '--disable-extensions',
         '--no-first-run',
         '--no-zygote',
+        '--single-process',
       ],
     },
   };
@@ -312,12 +313,17 @@ async function runClientInitialize(retryCount: number): Promise<void> {
   await safeDestroyClient();
 
   const generation = ++activeClientGen;
+  console.log('[WhatsApp] Creating Client instance with options...');
   const instance = new Client(buildClientOptions());
   client = instance;
+  
+  console.log('[WhatsApp] Attaching event handlers...');
   attachClientEvents(instance, generation);
 
   try {
+    console.log('[WhatsApp] Calling instance.initialize() (launching browser)...');
     await instance.initialize();
+    console.log('[WhatsApp] Client.initialize() completed successfully!');
     if (generation !== activeClientGen) return;
     if (!isReady && !isAuthenticated) {
       lastStatusMessage = latestQrDataUrl ? 'waiting_for_scan' : 'initializing';
