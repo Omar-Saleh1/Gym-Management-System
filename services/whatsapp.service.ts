@@ -160,6 +160,7 @@ function buildClientOptions() {
         '--no-first-run',
         '--no-zygote',
         '--single-process',
+        '--js-flags=--max-old-space-size=256',
       ],
     },
   };
@@ -336,10 +337,21 @@ async function runClientInitialize(retryCount: number): Promise<void> {
 
     await safeDestroyClient();
 
+    // Clear auth and cache paths to heal corrupted profile states
+    console.log('[WhatsApp] Clearing auth and cache directories to fix potentially corrupted profile state...');
+    try {
+      if (fs.existsSync(AUTH_DATA_PATH)) fs.rmSync(AUTH_DATA_PATH, { recursive: true, force: true });
+      if (fs.existsSync(CACHE_DATA_PATH)) fs.rmSync(CACHE_DATA_PATH, { recursive: true, force: true });
+      console.log('[WhatsApp] Auth and cache directories cleared successfully.');
+    } catch (clearErr: any) {
+      console.warn('[WhatsApp] Failed to clear session directories:', clearErr.message);
+    }
+
     if (retryCount < MAX_INIT_RETRIES - 1) {
       console.log(`[WhatsApp] Retrying initialize in ${INIT_RETRY_DELAY_MS / 1000}s...`);
       await new Promise((r) => setTimeout(r, INIT_RETRY_DELAY_MS));
-      return createClientInstance(retryCount + 1);
+      // Call runClientInitialize directly to bypass createClientInstance promise lock
+      return runClientInitialize(retryCount + 1);
     }
 
     console.error('[WhatsApp] Max init retries reached — WhatsApp disabled until service restart');
