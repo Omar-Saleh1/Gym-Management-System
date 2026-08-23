@@ -14,29 +14,17 @@ export const getStatus = (_req: Request, res: Response) => {
 
 /** GET /api/whatsapp/qr — never creates a new client; reads cached QR/state only */
 export const getQrPage = (req: Request, res: Response) => {
-  const status = getWhatsAppStatus();
+  const statusInfo = getWhatsAppStatus();
   const qrDataUrl = getLatestQrDataUrl();
 
-  if (status.ready) {
+  if (statusInfo.connected) {
     const payload = {
       ready: true,
       authenticated: true,
-      statusMessage: 'ready',
+      statusMessage: statusInfo.status,
       message: 'WhatsApp Connected Successfully',
     };
     return wantsJson(req) ? res.json(payload) : res.send(renderConnectedPage());
-  }
-
-  if (status.authenticated && !status.ready) {
-    if (wantsJson(req)) {
-      return res.json({
-        ready: false,
-        authenticated: true,
-        statusMessage: status.statusMessage,
-        message: 'Authenticated — waiting for ready...',
-      });
-    }
-    return res.send(renderWaitingPage('Authenticated — connecting to WhatsApp...'));
   }
 
   if (!qrDataUrl) {
@@ -44,18 +32,18 @@ export const getQrPage = (req: Request, res: Response) => {
       return res.json({
         ready: false,
         authenticated: false,
-        statusMessage: status.statusMessage,
+        statusMessage: statusInfo.status,
         message: 'QR not ready yet — please wait',
       });
     }
-    return res.send(renderWaitingPage(status.statusMessage || 'Preparing QR code...'));
+    return res.send(renderWaitingPage(statusInfo.status || 'Preparing QR code...'));
   }
 
   if (wantsJson(req)) {
     return res.json({
       ready: false,
       authenticated: false,
-      statusMessage: 'waiting_for_scan',
+      statusMessage: statusInfo.status,
       qrDataUrl,
     });
   }

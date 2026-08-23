@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Attendance from '../models/Attendance';
 import Member from '../models/Member';
 import Subscription from '../models/Subscription';
+import { sendWhatsApp, templates } from '../services/whatsapp.service';
 
 // ─── helper ───────────────────────────────────────────────────────────────────
 
@@ -12,19 +13,31 @@ const todayString = () => new Date().toISOString().split('T')[0]; // "2026-08-20
 
 export const scanQR = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { code } = req.body;
-    if (!code) return res.status(400).json({ message: 'مفيش كود متقروء' });
+    const qrToken = req.body.qrToken || req.body.code || req.body.qrCode;
+    if (!qrToken) return res.status(400).json({ success: false, message: 'Missing QR token' });
 
-    const token = code.trim();
+    const token = qrToken.trim();
 
-    // Find member by qrToken field (secure – no MongoDB ID exposed)
-    let member = await Member.findOne({ qrToken: token });
-    if (!member && mongoose.Types.ObjectId.isValid(token)) {
-      member = await Member.findById(token);
+    // 1. Find member by qrToken field (secure – no MongoDB ID exposed)
+    const member = await Member.findOne({ qrToken: token });
+    if (!member) {
+      return res.status(404).json({ success: false, message: 'Member not found' });
     }
     
-    if (!member) return res.status(404).json({ message: 'الكود ده مش مرتبط بأي عضو' });
-    if (!member.active) return res.status(400).json({ message: 'العضو مش نشط' });
+    // Check if QR is active
+    if (member.isQrActive === false) {
+      return res.status(403).json({ success: false, message: 'QR Code is inactive' });
+    }
+
+    if (!member.active) {
+      return res.status(403).json({ success: false, message: 'Member account is inactive' });
+    }
+
+    // Timezone suitable for Egypt
+    const now = new Date();
+    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
+    const cairoTime = new Date(cairoTimeStr);
+    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
 
     // Check for frozen subscription
     const frozenSub = await Subscription.findOne({
@@ -32,70 +45,65 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       status: 'frozen',
     });
     if (frozenSub) {
-      return res.status(403).json({
-        message: `❌ اشتراك ${member.name} مجمد حالياً. يرجى إلغاء التجميد أولاً.`,
-        member: member.name,
+      return res.status(422).json({
+        success: false,
+        message: 'Membership subscription is frozen',
       });
     }
 
-    // Check for an active subscription
+    // Verify that membership exists and is active/not expired
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      endDate: { $gte: new Date() },
+      startDate: { $lte: now },
+      endDate: { $gte: now },
     });
 
     if (!activeSub) {
-      return res.status(403).json({
-        message: `❌ اشتراك ${member.name} منتهي أو مش موجود. يحتاج تجديد.`,
-        member: member.name,
-        requiresRenewal: true,
+      return res.status(422).json({
+        success: false,
+        message: 'Membership subscription has expired',
       });
     }
 
-    const today = todayString();
-
-    // Toggle: if open session exists → checkout; else → checkin
-    const openRecord = await Attendance.findOne({
+    // Check if checked in today
+    const existing = await Attendance.findOne({
       member: member._id,
-      date:   today,
-      status: 'open',
+      date: today,
     });
 
-    if (openRecord) {
-      // Checkout
-      openRecord.checkOutTime = new Date();
-      openRecord.status       = 'completed';
-      await openRecord.save();
-
-      const duration = Math.round(
-        (openRecord.checkOutTime.getTime() - openRecord.checkInTime.getTime()) / 1000 / 60
-      );
-
-      return res.json({
-        action:          'checkout',
-        member:          member.name,
-        time:            openRecord.checkOutTime,
-        durationMinutes: duration,
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'Member already checked in today',
       });
     }
 
-    // Checkin
-    const record = await Attendance.create({
+    // Record attendance
+    await Attendance.create({
       member:      member._id,
-      checkInTime: new Date(),
+      checkInTime: now,
       date:        today,
       qrToken:     token,
       status:      'open',
     });
 
-    return res.status(201).json({
-      action: 'checkin',
-      member: member.name,
-      time:   record.checkInTime,
+    // Send WhatsApp Notification (Non-blocking)
+    if (member.phone) {
+      const timeStr = cairoTime.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+      sendWhatsApp(member.phone, templates.checkInSuccess(member.name, timeStr)).catch(e => console.error('[WhatsApp] checkin notification error:', e));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Attendance recorded successfully',
+      member: {
+        id: member._id,
+        name: member.name
+      },
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

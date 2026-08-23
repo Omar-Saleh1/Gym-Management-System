@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
+import QRCode from 'qrcode';
+import crypto from 'crypto';
 import Member from '../models/Member';
 import Subscription from '../models/Subscription';
 
@@ -110,6 +112,56 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
       membershipStatus,
       endDate,
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getMemberQrCode = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+
+    if (!member.isQrActive) {
+      return res.status(400).json({ message: 'الـ QR الخاص بهذا العضو معطل' });
+    }
+
+    const qrDataUrl = await QRCode.toDataURL(member.qrToken);
+    res.json({ success: true, qrCode: qrDataUrl });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const regenerateMemberQr = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+
+    member.qrToken = crypto.randomBytes(24).toString('hex');
+    await member.save();
+
+    const qrDataUrl = await QRCode.toDataURL(member.qrToken);
+    res.json({ success: true, message: 'تم إعادة إنشاء الـ QR بنجاح', qrCode: qrDataUrl });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const toggleMemberQr = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { isQrActive } = req.body;
+    if (typeof isQrActive !== 'boolean') {
+      return res.status(400).json({ message: 'يجب تحديد حالة الـ QR (مفعل/معطل)' });
+    }
+
+    const member = await Member.findById(req.params.id);
+    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+
+    member.isQrActive = isQrActive;
+    await member.save();
+
+    res.json({ success: true, message: isQrActive ? 'تم تفعيل الـ QR' : 'تم تعطيل الـ QR' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

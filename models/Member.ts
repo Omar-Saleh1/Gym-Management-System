@@ -13,6 +13,7 @@ export interface IMember extends Document {
   notes?: string;
   active: boolean;
   qrToken: string;      // unique QR token
+  isQrActive: boolean;  // whether the QR token is currently valid/enabled
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,7 +29,8 @@ const memberSchema = new Schema<IMember>(
     photo:       { type: String },
     notes:       { type: String },
     active:      { type: Boolean, default: true },
-    qrToken:     { type: String, unique: true, default: () => `GYM-${crypto.randomUUID().slice(0, 10).toUpperCase()}` },
+    isQrActive:  { type: Boolean, default: true },
+    qrToken:     { type: String, unique: true, default: () => crypto.randomBytes(24).toString('hex') },
   },
   { timestamps: true }
 );

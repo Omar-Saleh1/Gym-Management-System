@@ -7,6 +7,9 @@ import {
   updateMember,
   deleteMember,
   getPublicMemberByToken,
+  getMemberQrCode,
+  regenerateMemberQr,
+  toggleMemberQr,
 } from '../controllers/memberController';
 
 const router = express.Router();
@@ -22,5 +25,10 @@ router.get('/:id', getMemberById);
 router.post('/', createMember);
 router.put('/:id', updateMember);
 router.delete('/:id', deleteMember);
+
+// QR Management Routes
+router.get('/:id/qr', getMemberQrCode);
+router.post('/:id/qr/regenerate', regenerateMemberQr);
+router.patch('/:id/qr', toggleMemberQr);
 
 export default router;
