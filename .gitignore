@@ -7,3 +7,5 @@ dist/
 uploads/products/*
 !uploads/products/.gitkeep
 *.log
+
+baileys_auth/
