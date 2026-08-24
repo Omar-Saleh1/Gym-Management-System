@@ -4,6 +4,10 @@ import QRCode from 'qrcode';
 import crypto from 'crypto';
 import Member from '../models/Member';
 import Subscription from '../models/Subscription';
+import Attendance from '../models/Attendance';
+import Payment from '../models/Payment';
+import WorkoutPlan from '../models/WorkoutPlan';
+import DietPlan from '../models/DietPlan';
 
 export const getMembers = async (req: Request, res: Response): Promise<any> => {
   try {
@@ -164,5 +168,67 @@ export const toggleMemberQr = async (req: Request, res: Response): Promise<any> 
     res.json({ success: true, message: isQrActive ? 'تم تفعيل الـ QR' : 'تم تعطيل الـ QR' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// ─── GET /api/members/:id/profile ────────────────────────────────────────────
+export const getMemberProfile = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { id } = req.params;
+
+    const member = await Member.findById(id).select('-__v');
+    if (!member) return res.status(404).json({ success: false, message: 'Member not found' });
+
+    // Active subscription
+    const subscription = await Subscription.findOne({ member: id, status: 'active' })
+      .populate('plan', 'name')
+      .sort({ endDate: -1 });
+
+    // Attendance this month
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const attendanceCount = await Attendance.countDocuments({
+      member: id,
+      date: { $gte: startOfMonth },
+    });
+
+    // Last 10 attendances
+    const recentAttendance = await Attendance.find({ member: id })
+      .sort({ checkInTime: -1 })
+      .limit(10);
+
+    // Payment summary
+    const payments = await Payment.find({ member: id }).sort({ paymentDate: -1 });
+    const totalPaid = payments.reduce((s, p) => s + p.paidAmount, 0);
+    const totalRemaining = payments.reduce((s, p) => s + p.remainingAmount, 0);
+
+    // Active workout plan
+    const workoutPlan = await WorkoutPlan.findOne({ member: id, status: 'ACTIVE' })
+      .populate('trainer', 'name')
+      .sort({ createdAt: -1 });
+
+    // Active diet plan
+    const dietPlan = await DietPlan.findOne({ member: id, status: 'ACTIVE' })
+      .populate('trainer', 'name')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      member,
+      subscription,
+      attendance: {
+        thisMonth: attendanceCount,
+        recent: recentAttendance,
+      },
+      payments: {
+        totalPaid,
+        totalRemaining,
+        history: payments,
+      },
+      workoutPlan,
+      dietPlan,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };

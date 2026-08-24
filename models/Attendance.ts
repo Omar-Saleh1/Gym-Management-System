@@ -7,7 +7,8 @@ export interface IAttendance extends Document {
   checkOutTime?: Date;
   date: string;           // YYYY-MM-DD for easy daily queries
   qrToken?: string;       // the QR token that was scanned
-  status: 'open' | 'completed';
+  method: 'QR' | 'MANUAL' | 'ADMIN';
+  status: 'open' | 'completed' | 'CHECKED_IN' | 'CHECKED_OUT';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,7 +20,8 @@ const attendanceSchema = new Schema<IAttendance>(
     checkOutTime: { type: Date },
     date:         { type: String, required: true },   // "2026-08-20"
     qrToken:      { type: String },
-    status:       { type: String, enum: ['open', 'completed'], default: 'open' },
+    method:       { type: String, enum: ['QR', 'MANUAL', 'ADMIN'], default: 'QR' },
+    status:       { type: String, enum: ['open', 'completed', 'CHECKED_IN', 'CHECKED_OUT'], default: 'open' },
   },
   { timestamps: true }
 );

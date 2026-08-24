@@ -12,7 +12,10 @@ export type NotificationType =
   | 'absent_reminder'
   | 'birthday'
   | 'subscription_frozen'
-  | 'subscription_unfrozen';
+  | 'subscription_unfrozen'
+  | 'workout_plan'
+  | 'diet_plan'
+  | 'general';
 
 export interface INotificationLog extends Document {
   member:           mongoose.Types.ObjectId | IMember;

@@ -7,16 +7,22 @@ import {
   getAttendance,
   getMemberHistory,
   checkInByQR,
+  getTodayAttendance,
+  getAttendanceStats
 } from '../controllers/attendanceController';
 
 const router = express.Router();
 router.use(protect);
 
 router.get('/',                    getAttendance);
-router.get('/history/:memberId',   getMemberHistory);
+router.get('/today',               getTodayAttendance);
+router.get('/stats',               getAttendanceStats);
+router.get('/member/:memberId',    getMemberHistory);
+router.get('/history/:memberId',   getMemberHistory); // alias
 router.post('/scan',               scanQR);
 router.post('/checkin',            checkIn);
-router.post('/check-in',           checkInByQR); // Added for the specific request
+router.post('/check-in',           checkInByQR);
+router.post('/checkout',           checkOut);
 router.put('/checkout/:memberId',  checkOut);
 
 export default router;

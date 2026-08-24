@@ -80,12 +80,13 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     }
 
     // Record attendance
-    await Attendance.create({
+    const attendanceRecord = await Attendance.create({
       member:      member._id,
       checkInTime: now,
       date:        today,
       qrToken:     token,
-      status:      'open',
+      method:      'QR',
+      status:      'CHECKED_IN',
     });
 
     // Send WhatsApp Notification (Non-blocking)
@@ -96,11 +97,15 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
 
     return res.status(200).json({
       success: true,
-      message: 'Attendance recorded successfully',
+      message: 'Check-in successful',
       member: {
         id: member._id,
         name: member.name
       },
+      attendance: {
+        checkIn: attendanceRecord.checkInTime,
+        date: attendanceRecord.date
+      }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -142,27 +147,33 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
 export const checkOut = async (req: Request, res: Response): Promise<any> => {
   try {
     const today = todayString();
+    const memberId = req.body.memberId || req.params.memberId;
+    
+    if (!memberId) {
+      return res.status(400).json({ success: false, message: 'Missing memberId' });
+    }
 
     const record = await Attendance.findOne({
-      member: req.params.memberId,
+      member: memberId,
       date:   today,
-      status: 'open',
+      status: { $in: ['open', 'CHECKED_IN'] }
     });
 
     if (!record) {
-      return res.status(404).json({ message: 'مفيش تسجيل دخول مفتوح للعضو ده' });
+      return res.status(404).json({ success: false, message: 'No active check-in found' });
     }
 
     record.checkOutTime = new Date();
-    record.status       = 'completed';
+    record.status       = 'CHECKED_OUT';
     await record.save();
 
-    const duration = Math.round(
-      (record.checkOutTime.getTime() - record.checkInTime.getTime()) / 1000 / 60
-    );
-    res.json({ ...record.toObject(), durationMinutes: duration });
+    res.status(200).json({
+      success: true,
+      message: 'Check-out successful',
+      attendance: record
+    });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -227,8 +238,61 @@ export const getMemberHistory = async (req: Request, res: Response): Promise<any
   }
 };
 
-// ─── Check-In by QR Code (Specific API from prompt requirements) ───────────────────
+// ─── Get Today's Attendance ───────────────────────────────────────────────────
+export const getTodayAttendance = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const today = todayString();
+    const records = await Attendance.find({ date: today })
+      .populate('member', 'name phone qrToken')
+      .sort({ checkInTime: -1 });
+    res.status(200).json({ success: true, data: records });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
+// ─── Get Attendance Statistics ────────────────────────────────────────────────
+export const getAttendanceStats = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const today = todayString();
+    
+    // Cairo Date calculation for beginning of week/month
+    const now = new Date();
+    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
+    const cairoDate = new Date(cairoTimeStr);
+    
+    // Start of Month
+    const startOfMonthDate = new Date(cairoDate.getFullYear(), cairoDate.getMonth(), 1);
+    const startOfMonth = startOfMonthDate.getFullYear() + '-' + String(startOfMonthDate.getMonth() + 1).padStart(2, '0') + '-01';
+    
+    // Start of Week (assuming Sunday as start)
+    const startOfWeekDate = new Date(cairoDate);
+    startOfWeekDate.setDate(cairoDate.getDate() - cairoDate.getDay());
+    const startOfWeek = startOfWeekDate.getFullYear() + '-' + String(startOfWeekDate.getMonth() + 1).padStart(2, '0') + '-' + String(startOfWeekDate.getDate()).padStart(2, '0');
+
+    const todayCount = await Attendance.countDocuments({ date: today });
+    const monthCount = await Attendance.countDocuments({ date: { $gte: startOfMonth } });
+    const weekCount = await Attendance.countDocuments({ date: { $gte: startOfWeek } });
+    
+    // Average Daily (rough estimate based on days elapsed in month)
+    const daysElapsed = cairoDate.getDate() || 1;
+    const averageDaily = Math.round(monthCount / daysElapsed);
+
+    res.status(200).json({
+      success: true,
+      stats: {
+        today: todayCount,
+        thisWeek: weekCount,
+        thisMonth: monthCount,
+        averageDaily,
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Check-In by QR Code (Specific API from prompt requirements) ───────────────────
 export const checkInByQR = async (req: Request, res: Response): Promise<any> => {
   try {
     const { qrCode } = req.body;

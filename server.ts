@@ -15,6 +15,10 @@ import attendanceRoutes    from './routes/attendanceRoutes';
 import reportRoutes        from './routes/reportRoutes';
 import notificationRoutes  from './routes/notificationRoutes';
 import whatsappRoutes      from './routes/whatsappRoutes';
+import paymentRoutes       from './routes/paymentRoutes';
+import expenseRoutes       from './routes/expenseRoutes';
+import workoutRoutes       from './routes/workoutRoutes';
+import dietRoutes          from './routes/dietRoutes';
 
 const app: Application = express();
 
@@ -40,6 +44,10 @@ app.use('/api/attendance',    attendanceRoutes);
 app.use('/api/reports',       reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/whatsapp',      whatsappRoutes);
+app.use('/api/payments',      paymentRoutes);
+app.use('/api/expenses',      expenseRoutes);
+app.use('/api/workout-plans', workoutRoutes);
+app.use('/api/diet-plans',    dietRoutes);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);

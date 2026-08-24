@@ -10,6 +10,7 @@ import {
   getMemberQrCode,
   regenerateMemberQr,
   toggleMemberQr,
+  getMemberProfile,
 } from '../controllers/memberController';
 
 const router = express.Router();
@@ -30,5 +31,8 @@ router.delete('/:id', deleteMember);
 router.get('/:id/qr', getMemberQrCode);
 router.post('/:id/qr/regenerate', regenerateMemberQr);
 router.patch('/:id/qr', toggleMemberQr);
+
+// Profile (full data aggregation)
+router.get('/:id/profile', getMemberProfile);
 
 export default router;
