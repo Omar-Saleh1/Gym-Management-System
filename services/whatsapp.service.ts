@@ -5,10 +5,11 @@ import pino from 'pino';
 import qrcode from 'qrcode';
 import { Boom } from '@hapi/boom';
 
+import { useMongoDBAuthState, AuthModel } from './mongoAuthState';
+
 const PROVIDER = process.env.WHATSAPP_PROVIDER || 'local'; // default to local now
 
 // Baileys config
-const AUTH_DIR = './baileys_auth';
 let waSocket: any = null;
 let currentQrDataUrl: string | null = null;
 let isConnected = false;
@@ -40,7 +41,7 @@ export async function initWhatsAppClient() {
   console.log('[WhatsApp] Starting Baileys (Lightweight)...');
 
   try {
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { state, saveCreds } = await useMongoDBAuthState('gym-system');
 
     waSocket = makeWASocket({
       auth: state,
@@ -70,7 +71,9 @@ export async function initWhatsAppClient() {
         if (shouldReconnect) {
           setTimeout(initWhatsAppClient, 5000);
         } else {
-          console.log('[WhatsApp] Logged out. Delete auth folder to restart.');
+          console.log('[WhatsApp] Logged out. Wiping MongoDB auth state to restart.');
+          await AuthModel.deleteMany({ sessionId: 'gym-system' }).catch(console.error);
+          setTimeout(initWhatsAppClient, 5000);
         }
       }
 
