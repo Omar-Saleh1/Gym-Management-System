@@ -118,7 +118,8 @@ export async function notifyExpired(member: IMember & { _id: any }, subscription
 export async function notifyPaymentSuccess(
   member: IMember & { _id: any; qrToken?: string },
   subscription: ISubscription & { _id: any },
-  planName: string
+  planName: string,
+  isRenewal: boolean = true
 ) {
   const endDate = new Date(subscription.endDate).toLocaleDateString('ar-EG');
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -127,7 +128,9 @@ export async function notifyPaymentSuccess(
   return sendNotification({
     member: member as any,
     type:        'payment_success',
-    message:     templates.paymentSuccess(member.name, planName, endDate, qrLink),
+    message:     isRenewal 
+      ? templates.paymentSuccess(member.name, planName, endDate, qrLink)
+      : templates.newSubscription(member.name, planName, endDate, qrLink),
     referenceId: String(subscription._id),
   });
 }

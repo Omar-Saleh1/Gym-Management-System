@@ -112,10 +112,25 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       { path: 'plan', select: 'name durationInDays price' },
     ]);
 
-    // Send WhatsApp notification with QR link
-    notifyPaymentSuccess(populated.member as any, populated as any, (populated.plan as any).name).catch((err) => {
-      console.error('Failed to send WhatsApp notification:', err);
-    });
+    // Skip notification for Day Pass (1 day duration)
+    if (plan.durationInDays !== 1) {
+      // Check if member has previous subscriptions
+      const previousSubsCount = await Subscription.countDocuments({ 
+        member: memberId, 
+        _id: { $ne: subscription._id } 
+      });
+      const isRenewal = previousSubsCount > 0;
+
+      // Send WhatsApp notification with QR link
+      notifyPaymentSuccess(
+        populated.member as any, 
+        populated as any, 
+        (populated.plan as any).name,
+        isRenewal
+      ).catch((err) => {
+        console.error('Failed to send WhatsApp notification:', err);
+      });
+    }
 
     res.status(201).json(populated);
   } catch (err: any) {

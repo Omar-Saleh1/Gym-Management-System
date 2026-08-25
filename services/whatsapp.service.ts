@@ -140,6 +140,9 @@ export const templates = {
   paymentSuccess: (name: string, planName: string, endDate: string, qrLink: string) =>
     `مرحباً ${name}،\n\nتم تجديد اشتراكك في "${planName}" بنجاح.\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً!`,
 
+  newSubscription: (name: string, planName: string, endDate: string, qrLink: string) =>
+    `مرحباً ${name}،\n\nأهلاً بك في عائلتنا! تم تفعيل اشتراكك في "${planName}" بنجاح.\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً!`,
+
   newMembership: (name: string) =>
     `أهلاً بك يا ${name} في الجيم!\n\nيسعدنا انضمامك إلينا. نتمنى لك تجربة رياضية ممتازة وتحقيق أهدافك معنا. أهلاً بك في عائلتنا!`,
 
