@@ -11,6 +11,7 @@ import {
   cancelSubscription,
   freezeSubscription,
   unfreezeSubscription,
+  getExpiringSoon,
 } from '../controllers/subscriptionController';
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.post('/plans', createPlan);
 router.put('/plans/:id', updatePlan);
 router.delete('/plans/:id', deletePlan);
 
+router.get('/expiring-soon', getExpiringSoon);
 router.get('/', getSubscriptions);
 router.post('/', createSubscription);
 router.put('/:id', updateSubscription);

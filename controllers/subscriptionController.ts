@@ -76,6 +76,41 @@ export const getSubscriptions = async (req: Request, res: Response): Promise<any
   }
 };
 
+export const getExpiringSoon = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { days = '7' } = req.query;
+    
+    // Validation
+    const daysNum = Number(days);
+    if (isNaN(daysNum) || !Number.isInteger(daysNum) || daysNum <= 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'عدد الأيام يجب أن يكون رقماً صحيحاً أكبر من الصفر / Days must be a positive integer' 
+      });
+    }
+
+    const now = new Date();
+    const soon = new Date();
+    soon.setDate(soon.getDate() + daysNum);
+
+    const subscriptions = await Subscription.find({
+      status: 'active',
+      endDate: { $gte: now, $lte: soon }
+    })
+    .populate('member', 'name phone email')
+    .populate('plan', 'name durationInDays price')
+    .sort({ endDate: 1 });
+
+    res.json({
+      success: true,
+      count: subscriptions.length,
+      data: subscriptions
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 export const createSubscription = async (req: Request, res: Response): Promise<any> => {
   try {
     const { memberId, planId, paymentMethod } = req.body;
