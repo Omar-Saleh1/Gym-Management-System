@@ -43,11 +43,42 @@ export const getMemberById = async (req: Request, res: Response): Promise<any> =
 
 export const createMember = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { name, phone } = req.body;
+    const { name, phone, email } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ message: 'الاسم والتليفون مطلوبين' });
     }
-    const member = await Member.create(req.body);
+
+    // Name validation
+    if (name.trim().length < 3) {
+      return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
+    }
+
+    // Phone validation
+    const phoneRegex = /^01[0125]\d{8}$/;
+    if (!phoneRegex.test(phone.trim())) {
+      return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
+    }
+
+    // Duplicate phone check
+    const existingPhone = await Member.findOne({ phone: phone.trim(), active: true });
+    if (existingPhone) {
+      return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
+    }
+
+    // Email validation
+    if (email && email.trim() !== '') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        return res.status(400).json({ message: 'البريد الإلكتروني غير صحيح' });
+      }
+    }
+
+    const member = await Member.create({
+      ...req.body,
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email ? email.trim() : undefined
+    });
     res.status(201).json(member);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -56,10 +87,48 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
 
 export const updateMember = async (req: Request, res: Response): Promise<any> => {
   try {
-    const member = await Member.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+    const { name, phone, email } = req.body;
+
+    if (name && name.trim().length < 3) {
+      return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
+    }
+
+    if (phone) {
+      const phoneRegex = /^01[0125]\d{8}$/;
+      if (!phoneRegex.test(phone.trim())) {
+        return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
+      }
+
+      const existingPhone = await Member.findOne({ 
+        phone: phone.trim(), 
+        active: true, 
+        _id: { $ne: req.params.id } 
+      });
+      if (existingPhone) {
+        return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
+      }
+    }
+
+    if (email && email.trim() !== '') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        return res.status(400).json({ message: 'البريد الإلكتروني غير صحيح' });
+      }
+    }
+
+    const member = await Member.findByIdAndUpdate(
+      req.params.id, 
+      {
+        ...req.body,
+        name: name ? name.trim() : undefined,
+        phone: phone ? phone.trim() : undefined,
+        email: email ? email.trim() : undefined
+      }, 
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
     if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
     res.json(member);
   } catch (err: any) {
