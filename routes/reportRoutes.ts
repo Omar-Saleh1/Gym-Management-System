@@ -7,6 +7,7 @@ import {
   getAttendanceReport,
   getDailyFinancialReport,
   getMonthlyReport,
+  getDailyReport,
 } from '../controllers/reportController';
 
 const router = express.Router();
@@ -18,5 +19,6 @@ router.get('/subscriptions', getSubscriptionsReport);
 router.get('/attendance', getAttendanceReport);
 router.get('/daily-financial', getDailyFinancialReport);
 router.get('/monthly', getMonthlyReport);
+router.get('/daily', getDailyReport);
 
 export default router;

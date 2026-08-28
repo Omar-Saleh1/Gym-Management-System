@@ -6,6 +6,7 @@ import Attendance from '../models/Attendance';
 import Expense from '../models/Expense';
 import CoachSalary from '../models/CoachSalary';
 import Transaction from '../models/Transaction';
+import Payment from '../models/Payment';
 
 const buildDateRange = (from?: string, to?: string) => {
   const range: any = {};
@@ -381,6 +382,123 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       }
     });
 
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Daily Report ──────────────────────────────────────────────────────────────
+// GET /reports/daily?date=2026-08-28
+export const getDailyReport = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const dateParam = req.query.date as string;
+
+    // Parse target date in Cairo time
+    let targetDateCairo: Date;
+    if (dateParam) {
+      const [y, m, d] = dateParam.split('-').map(Number);
+      targetDateCairo = new Date(y, m - 1, d, 0, 0, 0, 0);
+    } else {
+      const nowCairoStr = new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
+      const nowCairo    = new Date(nowCairoStr);
+      targetDateCairo   = new Date(nowCairo.getFullYear(), nowCairo.getMonth(), nowCairo.getDate(), 0, 0, 0, 0);
+    }
+
+    const dayEndCairo = new Date(targetDateCairo);
+    dayEndCairo.setHours(23, 59, 59, 999);
+
+    // Convert Cairo local → UTC stored in MongoDB
+    const toUtc = (d: Date) => {
+      const temp = new Date(d.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
+      return new Date(d.getTime() - (temp.getTime() - d.getTime()));
+    };
+
+    const startUtc = toUtc(targetDateCairo);
+    const endUtc   = toUtc(dayEndCairo);
+
+    const dateStr = `${targetDateCairo.getFullYear()}-${String(targetDateCairo.getMonth() + 1).padStart(2, '0')}-${String(targetDateCairo.getDate()).padStart(2, '0')}`;
+
+    // ── Parallel queries ──────────────────────────────────────────────────────
+    const [
+      transactions,
+      subscriptions,
+      attendanceRecords,
+      newMembers,
+      settledPayments,
+    ] = await Promise.all([
+      // All transactions for this day
+      Transaction.find({ date: { $gte: startUtc, $lte: endUtc } })
+        .populate('memberId', 'name phone')
+        .populate('coachId', 'name')
+        .populate('createdBy', 'name')
+        .sort({ date: -1 }),
+      // Subscriptions created today
+      Subscription.find({ createdAt: { $gte: startUtc, $lte: endUtc } })
+        .populate('member', 'name phone')
+        .populate('plan', 'name price'),
+      // Attendance today
+      Attendance.find({ checkInTime: { $gte: startUtc, $lte: endUtc } })
+        .populate('member', 'name phone')
+        .sort({ checkInTime: -1 }),
+      // New members registered today
+      Member.find({ createdAt: { $gte: startUtc, $lte: endUtc } }).select('name phone'),
+      // Payments that were SETTLED (fully or partially) today — paymentDate updated today
+      Payment.find({ paymentDate: { $gte: startUtc, $lte: endUtc } })
+        .populate('member', 'name phone')
+        .populate('createdBy', 'name')
+        .sort({ paymentDate: -1 }),
+    ]);
+
+    // ── Financials ────────────────────────────────────────────────────────────
+    const totalIncome  = transactions.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + t.amount, 0);
+    const totalExpense = transactions.filter((t: any) => t.type === 'expense').reduce((s: number, t: any) => s + t.amount, 0);
+    const netProfit    = totalIncome - totalExpense;
+
+    // Income breakdown by category
+    const incomeByCategory: Record<string, number> = {};
+    transactions.filter((t: any) => t.type === 'income').forEach((t: any) => {
+      incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
+    });
+
+    // Expense breakdown
+    const expenseByCategory: Record<string, number> = {};
+    transactions.filter((t: any) => t.type === 'expense').forEach((t: any) => {
+      expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
+    });
+
+    // ── Attendance ────────────────────────────────────────────────────────────
+    const uniqueVisitors = new Set(attendanceRecords.map((r: any) => String(r.member?._id))).size;
+
+    // ── Payments settled today ────────────────────────────────────────────────
+    const paidOffToday = settledPayments.filter((p: any) => p.paidAmount > 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        date: dateStr,
+        financial: { totalIncome, totalExpense, netProfit },
+        incomeByCategory,
+        expenseByCategory,
+        transactions,
+        subscriptions: {
+          count: subscriptions.length,
+          list: subscriptions,
+        },
+        attendance: {
+          totalVisits: attendanceRecords.length,
+          uniqueVisitors,
+          list: attendanceRecords,
+        },
+        newMembers: {
+          count: newMembers.length,
+          list: newMembers,
+        },
+        settledPayments: {
+          count: paidOffToday.length,
+          list: paidOffToday,
+        },
+      }
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
