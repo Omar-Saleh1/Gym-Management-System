@@ -60,12 +60,13 @@ export const register = async (req: Request, res: Response): Promise<any> => {
     if (cashierCount > 0) {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(403).json({ message: 'لازم تكون أدمن عشان تضيف كاشير جديد' });
+        return res.status(403).json({ message: 'يرجى تسجيل الدخول أولاً لإضافة كاشير جديد' });
       }
       const token = authHeader.split(' ')[1];
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
-      if (decoded.role !== 'admin') {
-        return res.status(403).json({ message: 'الصلاحية دي للأدمن بس' });
+      try {
+        jwt.verify(token, JWT_SECRET);
+      } catch {
+        return res.status(401).json({ message: 'الجلسة منتهية، يرجى إعادة تسجيل الدخول' });
       }
     }
 
