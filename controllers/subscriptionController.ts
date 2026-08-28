@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import Subscription from '../models/Subscription';
 import SubscriptionPlan from '../models/SubscriptionPlan';
 import Member from '../models/Member';
+import Payment from '../models/Payment';
+import Transaction from '../models/Transaction';
 import {
   notifyPaymentSuccess,
   notifySubscriptionFrozen,
@@ -113,7 +115,7 @@ export const getExpiringSoon = async (req: Request, res: Response): Promise<any>
 
 export const createSubscription = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { memberId, planId, paymentMethod } = req.body;
+    const { memberId, planId, paymentMethod, pricePaid: customPricePaid, paidAmount: customPaidAmount } = req.body;
 
     if (!memberId || !planId) {
       return res.status(400).json({ message: 'معرّف العضو والخطة مطلوبين' });
@@ -128,6 +130,17 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
     if (!plan) return res.status(404).json({ message: 'الخطة مش موجودة' });
     if (!plan.active) return res.status(400).json({ message: 'الخطة دي مش متاحة حالياً' });
 
+    const totalAmount = customPricePaid !== undefined ? Number(customPricePaid) : plan.price;
+    const paidAmount = customPaidAmount !== undefined ? Number(customPaidAmount) : plan.price;
+
+    if (totalAmount < 0 || paidAmount < 0) {
+      return res.status(400).json({ message: 'المبالغ المالية لا يمكن أن تكون سالبة' });
+    }
+
+    if (paidAmount > totalAmount) {
+      return res.status(400).json({ message: 'المبلغ المدفوع لا يمكن أن يكون أكبر من المبلغ المطلوب' });
+    }
+
     const startDate = new Date();
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + plan.durationInDays);
@@ -137,10 +150,48 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       plan: planId,
       startDate,
       endDate,
-      pricePaid: plan.price,
-      paymentMethod: paymentMethod || 'cash',
-      createdBy: (req as any).cashier.id,
+      pricePaid: totalAmount,
+      paymentMethod: paymentMethod || 'CASH',
+      createdBy: (req as any).cashier.id || (req as any).cashier._id,
+      notes: req.body.notes || '',
     });
+
+    // Reactivate Member QR automatically
+    member.active = true;
+    member.isQrActive = true;
+    await member.save();
+
+    const remainingAmount = totalAmount - paidAmount;
+    let paymentStatus = 'PAID';
+    if (remainingAmount > 0 && paidAmount > 0) paymentStatus = 'PARTIAL';
+    else if (paidAmount === 0) paymentStatus = 'PENDING';
+
+    const payment = await Payment.create({
+      member: memberId,
+      subscription: subscription._id,
+      amount: totalAmount,
+      paidAmount,
+      remainingAmount,
+      paymentMethod: paymentMethod || 'CASH',
+      status: paymentStatus,
+      createdBy: (req as any).cashier.id || (req as any).cashier._id,
+      notes: req.body.notes || '',
+    });
+
+    if (paidAmount > 0) {
+      await Transaction.create({
+        type: 'income',
+        category: 'subscription',
+        amount: paidAmount,
+        date: new Date(),
+        memberId,
+        subscriptionId: subscription._id,
+        paymentId: payment._id,
+        paymentMethod: paymentMethod || 'CASH',
+        createdBy: (req as any).cashier.id || (req as any).cashier._id,
+        notes: req.body.notes || '',
+      });
+    }
 
     const populated = await subscription.populate([
       { path: 'member', select: 'name phone qrToken active' },

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import Expense from '../models/Expense';
 import Payment from '../models/Payment';
+import Transaction from '../models/Transaction';
 
 export const createExpense = async (req: Request, res: Response): Promise<any> => {
   try {
@@ -14,12 +15,24 @@ export const createExpense = async (req: Request, res: Response): Promise<any> =
       return res.status(400).json({ success: false, message: 'Amount cannot be negative' });
     }
 
+    const expenseDate = date ? new Date(date) : new Date();
+
     const expense = await Expense.create({
       title,
       amount,
       category,
-      date: date ? new Date(date) : new Date(),
+      date: expenseDate,
       notes,
+      createdBy: (req as any).cashier.id || (req as any).cashier._id,
+    });
+
+    await Transaction.create({
+      type: 'expense',
+      category: category ? category.toLowerCase() : 'other',
+      amount,
+      date: expenseDate,
+      notes,
+      description: title,
       createdBy: (req as any).cashier.id || (req as any).cashier._id,
     });
 
@@ -54,31 +67,22 @@ export const getExpenses = async (req: Request, res: Response): Promise<any> => 
 export const getFinancialSummary = async (req: Request, res: Response): Promise<any> => {
   try {
     const { startDate, endDate } = req.query;
-    const paymentQuery: any = {};
-    const expenseQuery: any = {};
+    const query: any = {};
 
     if (startDate || endDate) {
-      if (startDate) {
-        paymentQuery.paymentDate = { $gte: new Date(startDate as string) };
-        expenseQuery.date = { $gte: new Date(startDate as string) };
-      }
-      if (endDate) {
-        paymentQuery.paymentDate = paymentQuery.paymentDate || {};
-        paymentQuery.paymentDate.$lte = new Date(endDate as string);
-        
-        expenseQuery.date = expenseQuery.date || {};
-        expenseQuery.date.$lte = new Date(endDate as string);
-      }
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate as string);
+      if (endDate) query.date.$lte = new Date(endDate as string);
     }
 
-    const revenueResult = await Payment.aggregate([
-      { $match: paymentQuery },
-      { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+    const revenueResult = await Transaction.aggregate([
+      { $match: { ...query, type: 'income' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
 
-    const expenseResult = await Expense.aggregate([
-      { $match: expenseQuery },
+    const expenseResult = await Transaction.aggregate([
+      { $match: { ...query, type: 'expense' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const totalExpenses = expenseResult.length > 0 ? expenseResult[0].total : 0;

@@ -47,22 +47,28 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     if (frozenSub) {
       return res.status(422).json({
         success: false,
-        message: 'Membership subscription is frozen',
+        message: 'الاشتراك مجمد حالياً.',
       });
     }
 
     // Verify that membership exists and is active/not expired
-    const activeSub = await Subscription.findOne({
-      member: member._id,
-      status: 'active',
-      startDate: { $lte: now },
-      endDate: { $gte: now },
-    });
+    const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
 
-    if (!activeSub) {
+    if (!lastSub) {
       return res.status(422).json({
         success: false,
-        message: 'Membership subscription has expired',
+        message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
+      });
+    }
+
+    if (lastSub.status === 'expired' || new Date(lastSub.endDate) < now) {
+      if (lastSub.status !== 'expired') {
+        lastSub.status = 'expired';
+        await lastSub.save();
+      }
+      return res.status(422).json({
+        success: false,
+        message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
       });
     }
 

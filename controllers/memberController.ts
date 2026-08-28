@@ -248,10 +248,12 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
     const member = await Member.findById(id).select('-__v');
     if (!member) return res.status(404).json({ success: false, message: 'Member not found' });
 
-    // Active subscription
-    const subscription = await Subscription.findOne({ member: id, status: 'active' })
-      .populate('plan', 'name')
+    // Find latest subscription (regardless of status)
+    const subscription = await Subscription.findOne({ member: id })
+      .populate('plan', 'name price')
       .sort({ endDate: -1 });
+
+    const subscriptionPayment = subscription ? await Payment.findOne({ subscription: subscription._id }) : null;
 
     // Attendance this month
     const now = new Date();
@@ -285,6 +287,7 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
       success: true,
       member,
       subscription,
+      subscriptionPayment,
       attendance: {
         thisMonth: attendanceCount,
         recent: recentAttendance,

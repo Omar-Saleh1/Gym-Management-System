@@ -3,6 +3,7 @@ import Payment from '../models/Payment';
 import Subscription from '../models/Subscription';
 import Member from '../models/Member';
 import Expense from '../models/Expense';
+import Transaction from '../models/Transaction';
 import mongoose from 'mongoose';
 
 // ─── Create Payment ──────────────────────────────────────────────────────────
@@ -16,6 +17,10 @@ export const createPayment = async (req: Request, res: Response): Promise<any> =
 
     if (amount < 0 || paidAmount < 0) {
       return res.status(400).json({ success: false, message: 'Amount cannot be negative' });
+    }
+
+    if (paidAmount > amount) {
+      return res.status(400).json({ success: false, message: 'Paid amount cannot exceed total amount' });
     }
 
     const member = await Member.findById(memberId);
@@ -45,7 +50,67 @@ export const createPayment = async (req: Request, res: Response): Promise<any> =
       createdBy: (req as any).cashier.id || (req as any).cashier._id,
     });
 
+    if (paidAmount > 0) {
+      await Transaction.create({
+        type: 'income',
+        category: subscriptionId ? 'subscription' : 'other',
+        amount: paidAmount,
+        date: new Date(),
+        memberId,
+        subscriptionId: subscriptionId || undefined,
+        paymentId: payment._id,
+        paymentMethod,
+        createdBy: (req as any).cashier.id || (req as any).cashier._id,
+        notes,
+      });
+    }
+
     res.status(201).json({ success: true, payment });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Pay Remaining Balance ──────────────────────────────────────────────────
+export const payRemaining = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const { amountPaid, paymentMethod } = req.body;
+    const { id } = req.params;
+
+    if (!amountPaid || amountPaid <= 0) {
+      return res.status(400).json({ success: false, message: 'مبلغ الدفع يجب أن يكون أكبر من الصفر' });
+    }
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'الدفعة غير موجودة' });
+    }
+
+    if (amountPaid > payment.remainingAmount) {
+      return res.status(400).json({ success: false, message: 'المبلغ المدفوع أكبر من المتبقي' });
+    }
+
+    payment.paidAmount += amountPaid;
+    payment.remainingAmount -= payment.remainingAmount < amountPaid ? payment.remainingAmount : amountPaid;
+    payment.status = payment.remainingAmount === 0 ? 'PAID' : 'PARTIAL';
+    payment.paymentDate = new Date();
+    if (paymentMethod) payment.paymentMethod = paymentMethod;
+    await payment.save();
+
+    await Transaction.create({
+      type: 'income',
+      category: payment.subscription ? 'subscription' : 'other',
+      amount: amountPaid,
+      date: new Date(),
+      memberId: payment.member,
+      subscriptionId: payment.subscription || undefined,
+      paymentId: payment._id,
+      paymentMethod: paymentMethod || payment.paymentMethod,
+      createdBy: (req as any).cashier.id || (req as any).cashier._id,
+      notes: 'سداد جزء متبقي من الدفعة',
+    });
+
+    res.status(200).json({ success: true, payment });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -63,17 +128,28 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
     startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
     const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
 
+    const getCairoUtcDate = (localDate: Date) => {
+      const localTime = localDate.getTime();
+      const temp = new Date(localDate.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
+      const diff = temp.getTime() - localDate.getTime();
+      return new Date(localTime - diff);
+    };
+
+    const startOfTodayUtc = getCairoUtcDate(startOfToday);
+    const startOfWeekUtc = getCairoUtcDate(startOfWeek);
+    const startOfMonthUtc = getCairoUtcDate(startOfMonth);
+
     const aggregateRevenue = async (matchQuery: any) => {
-      const result = await Payment.aggregate([
-        { $match: matchQuery },
-        { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+      const result = await Transaction.aggregate([
+        { $match: { ...matchQuery, type: 'income' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
       ]);
       return result.length > 0 ? result[0].total : 0;
     };
 
-    const todayRev = await aggregateRevenue({ paymentDate: { $gte: startOfToday } });
-    const weekRev = await aggregateRevenue({ paymentDate: { $gte: startOfWeek } });
-    const monthRev = await aggregateRevenue({ paymentDate: { $gte: startOfMonth } });
+    const todayRev = await aggregateRevenue({ date: { $gte: startOfTodayUtc } });
+    const weekRev = await aggregateRevenue({ date: { $gte: startOfWeekUtc } });
+    const monthRev = await aggregateRevenue({ date: { $gte: startOfMonthUtc } });
     const totalRev = await aggregateRevenue({});
     
     const outstandingResult = await Payment.aggregate([
@@ -83,7 +159,7 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
     const outstanding = outstandingResult.length > 0 ? outstandingResult[0].total : 0;
 
     const pendingPayments = await Payment.countDocuments({ status: 'PENDING' });
-    const txCount = await Payment.countDocuments({});
+    const txCount = await Transaction.countDocuments({ type: 'income' });
 
     res.status(200).json({
       success: true,
