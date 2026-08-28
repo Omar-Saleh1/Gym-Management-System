@@ -3,6 +3,9 @@ import Sale from '../models/Sale';
 import Member from '../models/Member';
 import Subscription from '../models/Subscription';
 import Attendance from '../models/Attendance';
+import Expense from '../models/Expense';
+import CoachSalary from '../models/CoachSalary';
+import Transaction from '../models/Transaction';
 
 const buildDateRange = (from?: string, to?: string) => {
   const range: any = {};
@@ -218,5 +221,167 @@ export const getDailyFinancialReport = async (req: Request, res: Response): Prom
 
   } catch (err: any) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// ─── Monthly Report ───────────────────────────────────────────────────────────
+// GET /reports/monthly?year=2026&month=8
+export const getMonthlyReport = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const now = new Date();
+    const year  = parseInt(req.query.year  as string) || now.getFullYear();
+    const month = parseInt(req.query.month as string) || (now.getMonth() + 1); // 1-based
+
+    // Build UTC-safe month boundaries (Cairo = UTC+2/+3 – using local Date arithmetic)
+    const startLocal = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const endLocal   = new Date(year, month,     0, 23, 59, 59, 999); // last day of month
+
+    const toUtc = (d: Date) => {
+      const temp = new Date(d.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
+      return new Date(d.getTime() - (temp.getTime() - d.getTime()));
+    };
+    const startUtc = toUtc(startLocal);
+    const endUtc   = toUtc(endLocal);
+
+    const monthStr = `${year}-${String(month).padStart(2, '0')}`; // "2026-08"
+
+    // ── Parallel queries ──────────────────────────────────────────────────────
+    const [
+      transactions,
+      subscriptions,
+      newMembers,
+      attendanceRecords,
+      expenses,
+      coachSalaries,
+      sales,
+    ] = await Promise.all([
+      // All transactions in the month
+      Transaction.find({ date: { $gte: startUtc, $lte: endUtc } })
+        .populate('memberId', 'name')
+        .populate('coachId', 'name')
+        .sort({ date: 1 }),
+      // Subscriptions created this month
+      Subscription.find({ createdAt: { $gte: startUtc, $lte: endUtc } })
+        .populate('member', 'name phone')
+        .populate('plan', 'name price'),
+      // New members registered this month
+      Member.find({ createdAt: { $gte: startUtc, $lte: endUtc } }).select('name phone createdAt'),
+      // Attendance this month
+      Attendance.find({ checkInTime: { $gte: startUtc, $lte: endUtc } })
+        .populate('member', 'name'),
+      // Expenses this month
+      Expense.find({ date: { $gte: startUtc, $lte: endUtc } }),
+      // Coach salaries for this month
+      CoachSalary.find({ month: monthStr }).populate('coach', 'name'),
+      // Cashier sales this month
+      Sale.find({ createdAt: { $gte: startUtc, $lte: endUtc } }),
+    ]);
+
+    // ── Financial Summary ─────────────────────────────────────────────────────
+    const totalIncome  = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const netProfit    = totalIncome - totalExpense;
+
+    // ── Income breakdown by category ──────────────────────────────────────────
+    const incomeByCategory: Record<string, number> = {};
+    transactions.filter(t => t.type === 'income').forEach(t => {
+      incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
+    });
+
+    // ── Expense breakdown by category ─────────────────────────────────────────
+    const expenseByCategory: Record<string, number> = {};
+    transactions.filter(t => t.type === 'expense').forEach(t => {
+      expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
+    });
+    // Also from Expense model (legacy)
+    expenses.forEach(e => {
+      const key = e.category.toLowerCase();
+      expenseByCategory[key] = (expenseByCategory[key] || 0) + e.amount;
+    });
+
+    // ── Daily income chart (day 1 → last day of month) ─────────────────────
+    const daysInMonth = endLocal.getDate();
+    const dailyIncome: { day: number; income: number; expense: number }[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayStart = new Date(year, month - 1, d, 0, 0, 0, 0);
+      const dayEnd   = new Date(year, month - 1, d, 23, 59, 59, 999);
+      const dayStartUtc = toUtc(dayStart);
+      const dayEndUtc   = toUtc(dayEnd);
+
+      const dayInc = transactions
+        .filter(t => t.type === 'income' && t.date >= dayStartUtc && t.date <= dayEndUtc)
+        .reduce((s, t) => s + t.amount, 0);
+      const dayExp = transactions
+        .filter(t => t.type === 'expense' && t.date >= dayStartUtc && t.date <= dayEndUtc)
+        .reduce((s, t) => s + t.amount, 0);
+
+      dailyIncome.push({ day: d, income: dayInc, expense: dayExp });
+    }
+
+    // ── Subscriptions ─────────────────────────────────────────────────────────
+    const subscriptionRevenue = subscriptions.reduce((s, sub) => s + sub.pricePaid, 0);
+    const subStatusBreakdown  = subscriptions.reduce((acc: any, s) => {
+      acc[s.status] = (acc[s.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    // ── Attendance ────────────────────────────────────────────────────────────
+    const totalVisits    = attendanceRecords.length;
+    const uniqueVisitors = new Set(attendanceRecords.map(r => String((r.member as any)?._id))).size;
+    const avgDailyVisits = daysInMonth > 0 ? Math.round(totalVisits / daysInMonth) : 0;
+
+    // ── Top payers (from income transactions grouped by memberId) ─────────────
+    const memberTotals: Record<string, { name: string; total: number }> = {};
+    transactions.filter(t => t.type === 'income' && t.memberId).forEach(t => {
+      const m = t.memberId as any;
+      const id = String(m?._id || m);
+      if (!memberTotals[id]) memberTotals[id] = { name: m?.name || 'غير معروف', total: 0 };
+      memberTotals[id].total += t.amount;
+    });
+    const topPayers = Object.values(memberTotals)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+
+    // ── Sales (cashier) ───────────────────────────────────────────────────────
+    const salesRevenue = sales.reduce((s, sale) => s + sale.total, 0);
+
+    // ── Coach Salaries ────────────────────────────────────────────────────────
+    const totalSalariesDue  = coachSalaries.reduce((s, cs) => s + cs.salaryAmount, 0);
+    const totalSalariesPaid = coachSalaries.reduce((s, cs) => s + cs.paidAmount, 0);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    res.status(200).json({
+      success: true,
+      data: {
+        period: { year, month, monthStr, daysInMonth },
+        financial: { totalIncome, totalExpense, netProfit, salesRevenue, subscriptionRevenue },
+        incomeByCategory,
+        expenseByCategory,
+        dailyChart: dailyIncome,
+        subscriptions: {
+          count: subscriptions.length,
+          revenue: subscriptionRevenue,
+          statusBreakdown: subStatusBreakdown,
+          list: subscriptions,
+        },
+        members: {
+          newCount: newMembers.length,
+          list: newMembers,
+        },
+        attendance: {
+          totalVisits,
+          uniqueVisitors,
+          avgDailyVisits,
+        },
+        coachSalaries: {
+          totalDue: totalSalariesDue,
+          totalPaid: totalSalariesPaid,
+          list: coachSalaries,
+        },
+      }
+    });
+
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
