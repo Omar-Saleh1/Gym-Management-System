@@ -64,8 +64,10 @@ export const createSale = async (req: Request, res: Response): Promise<any> => {
 
 export const getSales = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { from, to } = req.query;
+    const { from, to, cashierId } = req.query;
     const query: any = {};
+
+    if (cashierId) query.cashier = cashierId;
 
     if (from || to) {
       query.createdAt = {};

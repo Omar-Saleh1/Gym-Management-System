@@ -12,6 +12,7 @@ export interface IMember extends Document {
   photo?: string;
   notes?: string;
   active: boolean;
+  shiftType: 'GIRLS' | 'BOYS' | 'unassigned'; // shift isolation
   qrToken: string;      // unique QR token
   isQrActive: boolean;  // whether the QR token is currently valid/enabled
   createdAt: Date;
@@ -29,10 +30,14 @@ const memberSchema = new Schema<IMember>(
     photo:       { type: String },
     notes:       { type: String },
     active:      { type: Boolean, default: true },
+    shiftType:   { type: String, enum: ['GIRLS', 'BOYS', 'unassigned'], default: 'unassigned' },
     isQrActive:  { type: Boolean, default: true },
     qrToken:     { type: String, unique: true, default: () => crypto.randomBytes(24).toString('hex') },
   },
   { timestamps: true }
 );
 
+memberSchema.index({ shiftType: 1, active: 1 });
+
 export default mongoose.model<IMember>('Member', memberSchema);
+

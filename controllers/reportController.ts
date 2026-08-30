@@ -7,6 +7,8 @@ import Expense from '../models/Expense';
 import CoachSalary from '../models/CoachSalary';
 import Transaction from '../models/Transaction';
 import Payment from '../models/Payment';
+import { getShiftFilter, AuthCashier } from '../middleware/auth';
+
 
 const buildDateRange = (from?: string, to?: string) => {
   const range: any = {};
@@ -21,6 +23,7 @@ const buildDateRange = (from?: string, to?: string) => {
 
 export const getDashboard = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -29,16 +32,24 @@ export const getDashboard = async (req: Request, res: Response): Promise<any> =>
     const soon = new Date();
     soon.setDate(soon.getDate() + 7);
 
+    const shiftFilter = getShiftFilter(cashier);
+    let memberFilter: any = {};
+    if (Object.keys(shiftFilter).length > 0) {
+      const shiftMembers = await Member.find({ ...shiftFilter }).select('_id');
+      memberFilter = { member: { $in: shiftMembers.map(m => m._id) } };
+    }
+
     const [todaySales, totalMembers, activeSubscriptions, expiringSoon, todayAttendance] =
       await Promise.all([
-        Sale.find({ createdAt: { $gte: today, $lt: tomorrow } }),
-        Member.countDocuments({ active: true }),
-        Subscription.countDocuments({ status: 'active', endDate: { $gte: new Date() } }),
+        Sale.find({ createdAt: { $gte: today, $lt: tomorrow }, ...(cashier?.id ? { cashier: cashier.id } : {}) }),
+        Member.countDocuments({ active: true, ...shiftFilter }),
+        Subscription.countDocuments({ status: 'active', endDate: { $gte: new Date() }, ...memberFilter }),
         Subscription.countDocuments({
           status: 'active',
           endDate: { $gte: new Date(), $lte: soon },
+          ...memberFilter,
         }),
-        Attendance.countDocuments({ checkInTime: { $gte: today, $lt: tomorrow } }),
+        Attendance.countDocuments({ checkInTime: { $gte: today, $lt: tomorrow }, ...shiftFilter }),
       ]);
 
     const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
@@ -245,6 +256,16 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
     const endUtc   = toUtc(endLocal);
 
     const monthStr = `${year}-${String(month).padStart(2, '0')}`; // "2026-08"
+    const cashierId = req.query.cashierId as string;
+
+    const txMatch: any = { date: { $gte: startUtc, $lte: endUtc } };
+    const subMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const saleMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    if (cashierId) {
+      txMatch.createdBy = cashierId;
+      subMatch.createdBy = cashierId;
+      saleMatch.cashier = cashierId;
+    }
 
     // ── Parallel queries ──────────────────────────────────────────────────────
     const [
@@ -257,12 +278,12 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       sales,
     ] = await Promise.all([
       // All transactions in the month
-      Transaction.find({ date: { $gte: startUtc, $lte: endUtc } })
+      Transaction.find(txMatch)
         .populate('memberId', 'name')
         .populate('coachId', 'name')
         .sort({ date: 1 }),
       // Subscriptions created this month
-      Subscription.find({ createdAt: { $gte: startUtc, $lte: endUtc } })
+      Subscription.find(subMatch)
         .populate('member', 'name phone')
         .populate('plan', 'name price'),
       // New members registered this month
@@ -275,7 +296,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       // Coach salaries for this month
       CoachSalary.find({ month: monthStr }).populate('coach', 'name'),
       // Cashier sales this month
-      Sale.find({ createdAt: { $gte: startUtc, $lte: endUtc } }),
+      Sale.find(saleMatch),
     ]);
 
     // ── Financial Summary ─────────────────────────────────────────────────────
@@ -418,6 +439,17 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
 
     const dateStr = `${targetDateCairo.getFullYear()}-${String(targetDateCairo.getMonth() + 1).padStart(2, '0')}-${String(targetDateCairo.getDate()).padStart(2, '0')}`;
 
+    const cashierId = req.query.cashierId as string;
+
+    const txMatch: any = { date: { $gte: startUtc, $lte: endUtc } };
+    const paymentMatch: any = { paymentDate: { $gte: startUtc, $lte: endUtc } };
+    const subMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    if (cashierId) {
+      txMatch.createdBy = cashierId;
+      paymentMatch.createdBy = cashierId;
+      subMatch.createdBy = cashierId;
+    }
+
     // ── Parallel queries ──────────────────────────────────────────────────────
     const [
       transactions,
@@ -427,13 +459,13 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       settledPayments,
     ] = await Promise.all([
       // All transactions for this day
-      Transaction.find({ date: { $gte: startUtc, $lte: endUtc } })
+      Transaction.find(txMatch)
         .populate('memberId', 'name phone')
         .populate('coachId', 'name')
         .populate('createdBy', 'name')
         .sort({ date: -1 }),
       // Subscriptions created today
-      Subscription.find({ createdAt: { $gte: startUtc, $lte: endUtc } })
+      Subscription.find(subMatch)
         .populate('member', 'name phone')
         .populate('plan', 'name price'),
       // Attendance today
@@ -443,7 +475,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       // New members registered today
       Member.find({ createdAt: { $gte: startUtc, $lte: endUtc } }).select('name phone'),
       // Payments that were SETTLED (fully or partially) today — paymentDate updated today
-      Payment.find({ paymentDate: { $gte: startUtc, $lte: endUtc } })
+      Payment.find(paymentMatch)
         .populate('member', 'name phone')
         .populate('createdBy', 'name')
         .sort({ paymentDate: -1 }),

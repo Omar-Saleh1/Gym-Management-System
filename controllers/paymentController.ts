@@ -5,20 +5,20 @@ import Member from '../models/Member';
 import Expense from '../models/Expense';
 import Transaction from '../models/Transaction';
 import mongoose from 'mongoose';
+import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
 
 // ─── Create Payment ──────────────────────────────────────────────────────────
 export const createPayment = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId, subscriptionId, amount, paymentMethod, paidAmount, notes } = req.body;
-    
+
     if (!memberId || !amount || paidAmount === undefined) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
-
     if (amount < 0 || paidAmount < 0) {
       return res.status(400).json({ success: false, message: 'Amount cannot be negative' });
     }
-
     if (paidAmount > amount) {
       return res.status(400).json({ success: false, message: 'Paid amount cannot exceed total amount' });
     }
@@ -26,6 +26,11 @@ export const createPayment = async (req: Request, res: Response): Promise<any> =
     const member = await Member.findById(memberId);
     if (!member) {
       return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    // SHIFT CHECK — backend verifies member belongs to cashier's shift
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'هذا العضو لا ينتمي لشفتك' });
     }
 
     if (subscriptionId) {
@@ -74,6 +79,7 @@ export const createPayment = async (req: Request, res: Response): Promise<any> =
 // ─── Pay Remaining Balance ──────────────────────────────────────────────────
 export const payRemaining = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { amountPaid, paymentMethod } = req.body;
     const { id } = req.params;
 
@@ -81,9 +87,15 @@ export const payRemaining = async (req: Request, res: Response): Promise<any> =>
       return res.status(400).json({ success: false, message: 'مبلغ الدفع يجب أن يكون أكبر من الصفر' });
     }
 
-    const payment = await Payment.findById(id);
+    const payment = await Payment.findById(id).populate('member');
     if (!payment) {
       return res.status(404).json({ success: false, message: 'الدفعة غير موجودة' });
+    }
+
+    // IDOR check — verify the member of this payment is in the cashier's shift
+    const member = await Member.findById(payment.member);
+    if (member && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'هذا العضو لا ينتمي لشفتك' });
     }
 
     if (amountPaid > payment.remainingAmount) {
@@ -116,9 +128,10 @@ export const payRemaining = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
-// ─── Revenue Dashboard ────────────────────────────────────────────────────────
+// ─── Revenue Dashboard — scoped by shift ─────────────────────────────────────
 export const getRevenueDashboard = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const now = new Date();
     const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
     const cairoDate = new Date(cairoTimeStr);
@@ -136,30 +149,55 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
     };
 
     const startOfTodayUtc = getCairoUtcDate(startOfToday);
-    const startOfWeekUtc = getCairoUtcDate(startOfWeek);
+    const startOfWeekUtc  = getCairoUtcDate(startOfWeek);
     const startOfMonthUtc = getCairoUtcDate(startOfMonth);
+
+    // Shift filter for transactions (by createdBy cashier's shift, based on JWT)
+    // We filter transactions by cashier's shiftType using member's shiftType via a lookup,
+    // but for simplicity we use the createdBy field which refers to the cashier.
+    // A cashier only creates transactions for their own shift (enforced by createPayment).
+    // For aggregate view, we need to get IDs of cashiers in same shift.
+    // Simpler approach: filter by member.shiftType via an aggregation $lookup or by pre-filtering memberIds.
+
+    const memberShiftFilter = getShiftFilter(cashier); // { shiftType } or {}
+    let memberIds: any[] = [];
+    let hasMemberFilter = false;
+
+    if (Object.keys(memberShiftFilter).length > 0) {
+      hasMemberFilter = true;
+      const shiftMembers = await Member.find({ ...memberShiftFilter, active: true }).select('_id');
+      memberIds = shiftMembers.map(m => m._id);
+    }
+
+    const buildTxMatch = (dateFilter: any) => {
+      const match: any = { ...dateFilter, type: 'income' };
+      if (hasMemberFilter) match.memberId = { $in: memberIds };
+      return match;
+    };
 
     const aggregateRevenue = async (matchQuery: any) => {
       const result = await Transaction.aggregate([
-        { $match: { ...matchQuery, type: 'income' } },
+        { $match: matchQuery },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]);
       return result.length > 0 ? result[0].total : 0;
     };
 
-    const todayRev = await aggregateRevenue({ date: { $gte: startOfTodayUtc } });
-    const weekRev = await aggregateRevenue({ date: { $gte: startOfWeekUtc } });
-    const monthRev = await aggregateRevenue({ date: { $gte: startOfMonthUtc } });
-    const totalRev = await aggregateRevenue({});
-    
+    const todayRev  = await aggregateRevenue(buildTxMatch({ date: { $gte: startOfTodayUtc } }));
+    const weekRev   = await aggregateRevenue(buildTxMatch({ date: { $gte: startOfWeekUtc } }));
+    const monthRev  = await aggregateRevenue(buildTxMatch({ date: { $gte: startOfMonthUtc } }));
+    const totalRev  = await aggregateRevenue(buildTxMatch({}));
+
+    const paymentMemberFilter = hasMemberFilter ? { member: { $in: memberIds } } : {};
+
     const outstandingResult = await Payment.aggregate([
-      { $match: { remainingAmount: { $gt: 0 } } },
+      { $match: { remainingAmount: { $gt: 0 }, ...paymentMemberFilter } },
       { $group: { _id: null, total: { $sum: '$remainingAmount' } } }
     ]);
     const outstanding = outstandingResult.length > 0 ? outstandingResult[0].total : 0;
 
-    const pendingPayments = await Payment.countDocuments({ status: 'PENDING' });
-    const txCount = await Transaction.countDocuments({ type: 'income' });
+    const pendingPayments = await Payment.countDocuments({ status: 'PENDING', ...paymentMemberFilter });
+    const txCount = await Transaction.countDocuments({ type: 'income', ...(hasMemberFilter ? { memberId: { $in: memberIds } } : {}) });
 
     res.status(200).json({
       success: true,
@@ -178,9 +216,10 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
   }
 };
 
-// ─── Get Payment Reports ──────────────────────────────────────────────────────
+// ─── Get Payments — scoped by shift ──────────────────────────────────────────
 export const getPayments = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { startDate, endDate, method, status, memberId } = req.query;
     const query: any = {};
 
@@ -191,7 +230,21 @@ export const getPayments = async (req: Request, res: Response): Promise<any> => 
     }
     if (method) query.paymentMethod = method;
     if (status) query.status = status;
-    if (memberId) query.member = memberId;
+    if (memberId) {
+      // IDOR: verify this member belongs to the cashier's shift
+      const member = await Member.findById(memberId as string);
+      if (member && !canAccessShift(cashier, member.shiftType)) {
+        return res.status(403).json({ success: false, message: 'هذا العضو لا ينتمي لشفتك' });
+      }
+      query.member = memberId;
+    } else {
+      // No specific memberId — scope to shift
+      const memberShiftFilter = getShiftFilter(cashier);
+      if (Object.keys(memberShiftFilter).length > 0) {
+        const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
+        query.member = { $in: shiftMembers.map(m => m._id) };
+      }
+    }
 
     const payments = await Payment.find(query)
       .populate('member', 'name phone')
@@ -203,3 +256,4 @@ export const getPayments = async (req: Request, res: Response): Promise<any> => 
     res.status(500).json({ success: false, message: err.message });
   }
 };
+

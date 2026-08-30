@@ -56,15 +56,27 @@ export const deletePlan = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
+import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
+
 export const getSubscriptions = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { expiringSoon } = req.query;
-    let query: any = {};
+
+    // Get member IDs scoped to this cashier's shift
+    const memberShiftFilter = getShiftFilter(cashier);
+    let memberIds: any[] | null = null;
+    if (Object.keys(memberShiftFilter).length > 0) {
+      const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
+      memberIds = shiftMembers.map(m => m._id);
+    }
+
+    let query: any = memberIds ? { member: { $in: memberIds } } : {};
 
     if (expiringSoon) {
       const soon = new Date();
       soon.setDate(soon.getDate() + 7);
-      query = { status: 'active', endDate: { $lte: soon, $gte: new Date() } };
+      query = { ...query, status: 'active', endDate: { $lte: soon, $gte: new Date() } };
     }
 
     const subscriptions = await Subscription.find(query)
@@ -80,14 +92,14 @@ export const getSubscriptions = async (req: Request, res: Response): Promise<any
 
 export const getExpiringSoon = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { days = '7' } = req.query;
-    
-    // Validation
+
     const daysNum = Number(days);
     if (isNaN(daysNum) || !Number.isInteger(daysNum) || daysNum <= 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'عدد الأيام يجب أن يكون رقماً صحيحاً أكبر من الصفر / Days must be a positive integer' 
+      return res.status(400).json({
+        success: false,
+        message: 'عدد الأيام يجب أن يكون رقماً صحيحاً أكبر من الصفر / Days must be a positive integer'
       });
     }
 
@@ -95,19 +107,24 @@ export const getExpiringSoon = async (req: Request, res: Response): Promise<any>
     const soon = new Date();
     soon.setDate(soon.getDate() + daysNum);
 
+    // Scope to shift
+    const memberShiftFilter = getShiftFilter(cashier);
+    let memberFilter: any = {};
+    if (Object.keys(memberShiftFilter).length > 0) {
+      const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
+      memberFilter = { member: { $in: shiftMembers.map(m => m._id) } };
+    }
+
     const subscriptions = await Subscription.find({
       status: 'active',
-      endDate: { $gte: now, $lte: soon }
+      endDate: { $gte: now, $lte: soon },
+      ...memberFilter,
     })
     .populate('member', 'name phone email')
     .populate('plan', 'name durationInDays price')
     .sort({ endDate: 1 });
 
-    res.json({
-      success: true,
-      count: subscriptions.length,
-      data: subscriptions
-    });
+    res.json({ success: true, count: subscriptions.length, data: subscriptions });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -115,6 +132,7 @@ export const getExpiringSoon = async (req: Request, res: Response): Promise<any>
 
 export const createSubscription = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId, planId, paymentMethod, pricePaid: customPricePaid, paidAmount: customPaidAmount } = req.body;
 
     if (!memberId || !planId) {
@@ -129,6 +147,11 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
     if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
     if (!plan) return res.status(404).json({ message: 'الخطة مش موجودة' });
     if (!plan.active) return res.status(400).json({ message: 'الخطة دي مش متاحة حالياً' });
+
+    // SHIFT CHECK — cashier can only subscribe members of their shift
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ message: 'هذا العضو لا ينتمي لشفتك' });
+    }
 
     const totalAmount = customPricePaid !== undefined ? Number(customPricePaid) : plan.price;
     const paidAmount = customPaidAmount !== undefined ? Number(customPaidAmount) : plan.price;

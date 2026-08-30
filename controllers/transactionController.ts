@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import Transaction from '../models/Transaction';
+import Member from '../models/Member';
 import mongoose from 'mongoose';
+import { getShiftFilter, AuthCashier } from '../middleware/auth';
 
 // Cairo Date Helper to build UTC range bounds
 const getCairoUtcRange = (range: string, from?: string, to?: string) => {
@@ -47,7 +49,8 @@ const getCairoUtcRange = (range: string, from?: string, to?: string) => {
 
 export const getTransactions = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { type, category, dateRange, from, to, method, memberId, coachId } = req.query;
+    const cashier: AuthCashier = (req as any).cashier;
+    const { type, category, dateRange, from, to, method, memberId, coachId, createdBy } = req.query;
     const query: any = {};
 
     if (type) query.type = type;
@@ -55,6 +58,14 @@ export const getTransactions = async (req: Request, res: Response): Promise<any>
     if (method) query.paymentMethod = method;
     if (memberId) query.memberId = memberId;
     if (coachId) query.coachId = coachId;
+    if (createdBy) query.createdBy = createdBy;
+
+    // Shift isolation
+    const memberShiftFilter = getShiftFilter(cashier);
+    if (Object.keys(memberShiftFilter).length > 0) {
+      const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
+      query.memberId = { $in: shiftMembers.map(m => m._id) };
+    }
 
     if (dateRange || from || to) {
       const { start, end } = getCairoUtcRange(
@@ -79,9 +90,19 @@ export const getTransactions = async (req: Request, res: Response): Promise<any>
 
 export const getTransactionsDashboard = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { dateRange, from, to } = req.query;
+    const cashier: AuthCashier = (req as any).cashier;
+    const { dateRange, from, to, createdBy } = req.query;
     const range = (dateRange as string) || 'today';
     const { start, end } = getCairoUtcRange(range, from as string, to as string);
+
+    const cashierMatch: any = createdBy ? { createdBy: new mongoose.Types.ObjectId(createdBy as string) } : {};
+
+    // Shift isolation
+    const memberShiftFilter = getShiftFilter(cashier);
+    if (Object.keys(memberShiftFilter).length > 0) {
+      const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
+      cashierMatch.memberId = { $in: shiftMembers.map(m => m._id) };
+    }
 
     // Cairo Current Month Start
     const now = new Date();
@@ -99,8 +120,8 @@ export const getTransactionsDashboard = async (req: Request, res: Response): Pro
     const startMonthUtc = getUtcDate(startOfCairoMonth);
 
     // Queries
-    const queryRange = { date: { $gte: start, $lte: end } };
-    const queryMonth = { date: { $gte: startMonthUtc } };
+    const queryRange = { date: { $gte: start, $lte: end }, ...cashierMatch };
+    const queryMonth = { date: { $gte: startMonthUtc }, ...cashierMatch };
 
     const aggregateTotal = async (matchQuery: any, type: 'income' | 'expense') => {
       const res = await Transaction.aggregate([
@@ -121,7 +142,7 @@ export const getTransactionsDashboard = async (req: Request, res: Response): Pro
       aggregateTotal(queryRange, 'expense'),
       aggregateTotal(queryMonth, 'income'),
       aggregateTotal(queryMonth, 'expense'),
-      Transaction.find({})
+      Transaction.find(cashierMatch)
         .populate('memberId', 'name')
         .populate('coachId', 'name')
         .sort({ date: -1 })

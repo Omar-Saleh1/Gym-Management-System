@@ -7,7 +7,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret_key_in_producti
 
 const generateToken = (cashier: any) =>
   jwt.sign(
-    { id: cashier._id, username: cashier.username, role: cashier.role, name: cashier.name },
+    {
+      id: cashier._id,
+      username: cashier.username,
+      role: cashier.role,
+      name: cashier.name,
+      shiftType: cashier.shiftType || null, // null = admin/trainer (no shift restriction)
+    },
     JWT_SECRET,
     { expiresIn: '12h' }
   );
@@ -37,6 +43,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
         name: cashier.name,
         username: cashier.username,
         role: cashier.role,
+        shiftType: cashier.shiftType || null,
       },
     });
   } catch (err: any) {
@@ -46,7 +53,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
 export const register = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { name, username, password, role } = req.body;
+    const { name, username, password, role, shiftType } = req.body;
 
     if (!name || !username || !password) {
       return res.status(400).json({ message: 'الاسم واليوزرنيم والباسورد مطلوبين' });
@@ -70,12 +77,17 @@ export const register = async (req: Request, res: Response): Promise<any> => {
       }
     }
 
+    const assignedRole = cashierCount === 0 ? 'admin' : (role || 'cashier');
+    // Only set shiftType for cashiers; admins/trainers have no shift restriction
+    const assignedShiftType = assignedRole === 'cashier' ? (shiftType || undefined) : undefined;
+
     const hashed = await bcrypt.hash(password, 10);
     const cashier = await Cashier.create({
       name,
       username: username.trim(),
       password: hashed,
-      role: cashierCount === 0 ? 'admin' : role || 'cashier',
+      role: assignedRole,
+      shiftType: assignedShiftType,
     });
 
     res.status(201).json({
@@ -83,6 +95,7 @@ export const register = async (req: Request, res: Response): Promise<any> => {
       name: cashier.name,
       username: cashier.username,
       role: cashier.role,
+      shiftType: cashier.shiftType || null,
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -110,12 +123,14 @@ export const getAllCashiers = async (req: Request, res: Response): Promise<any> 
 
 export const updateCashier = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { name, role, active, password } = req.body;
+    const { name, role, active, password, shiftType } = req.body;
     const updates: any = {};
     if (name) updates.name = name;
     if (role) updates.role = role;
     if (active !== undefined) updates.active = active;
     if (password) updates.password = await bcrypt.hash(password, 10);
+    // Allow updating shiftType; set to undefined if role is admin/trainer
+    if (shiftType !== undefined) updates.shiftType = shiftType || undefined;
 
     const cashier = await Cashier.findByIdAndUpdate(req.params.id, updates, { new: true }).select(
       '-password'
@@ -126,3 +141,4 @@ export const updateCashier = async (req: Request, res: Response): Promise<any> =
     res.status(500).json({ message: err.message });
   }
 };
+

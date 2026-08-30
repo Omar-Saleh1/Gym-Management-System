@@ -8,17 +8,39 @@ import Attendance from '../models/Attendance';
 import Payment from '../models/Payment';
 import WorkoutPlan from '../models/WorkoutPlan';
 import DietPlan from '../models/DietPlan';
+import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
 
+// ─── Helper: verify a member belongs to the cashier's shift ───────────────────
+const assertShiftAccess = async (cashier: AuthCashier, memberId: any, res: Response): Promise<any | null> => {
+  const member = await Member.findById(memberId);
+  if (!member) {
+    res.status(404).json({ message: 'العضو مش موجود' });
+    return null;
+  }
+  if (!canAccessShift(cashier, member.shiftType)) {
+    res.status(403).json({ message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    return null;
+  }
+  return member;
+};
+
+// ─── GET /api/members ─────────────────────────────────────────────────────────
 export const getMembers = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { search } = req.query;
-    const baseQuery = { active: true };
+
+    // Shift filter — admin sees all, cashier sees their shift
+    const shiftFilter = getShiftFilter(cashier);
+    const baseQuery = { active: true, ...shiftFilter };
+
     const query = search
-      ? { 
+      ? {
           ...baseQuery,
-          $or: [{ name: new RegExp(search as string, 'i') }, { phone: new RegExp(search as string, 'i') }] 
+          $or: [{ name: new RegExp(search as string, 'i') }, { phone: new RegExp(search as string, 'i') }],
         }
       : baseQuery;
+
     const members = await Member.find(query).sort({ createdAt: -1 });
     res.json(members);
   } catch (err: any) {
@@ -26,10 +48,17 @@ export const getMembers = async (req: Request, res: Response): Promise<any> => {
   }
 };
 
+// ─── GET /api/members/:id ─────────────────────────────────────────────────────
 export const getMemberById = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const member = await Member.findById(req.params.id);
     if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
+
+    // IDOR check
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
 
     const subscriptions = await Subscription.find({ member: member._id })
       .populate('plan', 'name durationInDays price')
@@ -41,31 +70,29 @@ export const getMemberById = async (req: Request, res: Response): Promise<any> =
   }
 };
 
+// ─── POST /api/members ────────────────────────────────────────────────────────
 export const createMember = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { name, phone, email } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ message: 'الاسم والتليفون مطلوبين' });
     }
 
-    // Name validation
     if (name.trim().length < 3) {
       return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
     }
 
-    // Phone validation
     const phoneRegex = /^01[0125]\d{8}$/;
     if (!phoneRegex.test(phone.trim())) {
       return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
     }
 
-    // Duplicate phone check
     const existingPhone = await Member.findOne({ phone: phone.trim(), active: true });
     if (existingPhone) {
       return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
     }
 
-    // Email validation
     if (email && email.trim() !== '') {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email.trim())) {
@@ -73,11 +100,18 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
       }
     }
 
+    // Security: backend always sets shiftType from JWT — NEVER from request body
+    const assignedShiftType = cashier.shiftType || 'unassigned';
+
+    // Strip shiftType from body (never trust client)
+    const { shiftType: _ignored, ...safeBody } = req.body;
+
     const member = await Member.create({
-      ...req.body,
+      ...safeBody,
       name: name.trim(),
       phone: phone.trim(),
-      email: email ? email.trim() : undefined
+      email: email ? email.trim() : undefined,
+      shiftType: assignedShiftType,
     });
     res.status(201).json(member);
   } catch (err: any) {
@@ -85,9 +119,15 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
   }
 };
 
+// ─── PUT /api/members/:id ─────────────────────────────────────────────────────
 export const updateMember = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { name, phone, email } = req.body;
+
+    // IDOR check
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
 
     if (name && name.trim().length < 3) {
       return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
@@ -98,11 +138,10 @@ export const updateMember = async (req: Request, res: Response): Promise<any> =>
       if (!phoneRegex.test(phone.trim())) {
         return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
       }
-
-      const existingPhone = await Member.findOne({ 
-        phone: phone.trim(), 
-        active: true, 
-        _id: { $ne: req.params.id } 
+      const existingPhone = await Member.findOne({
+        phone: phone.trim(),
+        active: true,
+        _id: { $ne: req.params.id },
       });
       if (existingPhone) {
         return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
@@ -116,40 +155,48 @@ export const updateMember = async (req: Request, res: Response): Promise<any> =>
       }
     }
 
-    const member = await Member.findByIdAndUpdate(
-      req.params.id, 
-      {
-        ...req.body,
-        name: name ? name.trim() : undefined,
-        phone: phone ? phone.trim() : undefined,
-        email: email ? email.trim() : undefined
-      }, 
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-    if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
-    res.json(member);
+    // Strip shiftType from body — cannot be changed by cashier
+    const { shiftType: _ignored, ...safeBody } = req.body;
+    // Admin can update shiftType explicitly via the safeBody only if admin
+    const updateData: any = {
+      ...safeBody,
+      name: name ? name.trim() : undefined,
+      phone: phone ? phone.trim() : undefined,
+      email: email ? email.trim() : undefined,
+    };
+    // Only admin can change shiftType
+    if (cashier.role === 'admin' && req.body.shiftType) {
+      updateData.shiftType = req.body.shiftType;
+    }
+
+    const updated = await Member.findByIdAndUpdate(req.params.id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+    if (!updated) return res.status(404).json({ message: 'العضو مش موجود' });
+    res.json(updated);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 };
 
+// ─── DELETE /api/members/:id ──────────────────────────────────────────────────
 export const deleteMember = async (req: Request, res: Response): Promise<any> => {
   try {
-    const member = await Member.findByIdAndUpdate(
-      req.params.id,
-      { active: false },
-      { new: true }
-    );
-    if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
+    const cashier: AuthCashier = (req as any).cashier;
+
+    // IDOR check
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
+
+    await Member.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
     res.json({ message: 'تم تعطيل العضو بنجاح' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 };
 
+// ─── GET /api/members/public/qr/:token ─── PUBLIC (no auth) ──────────────────
 export const getPublicMemberByToken = async (req: Request, res: Response): Promise<any> => {
   try {
     const { token } = req.params;
@@ -157,14 +204,12 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
     if (!member && mongoose.Types.ObjectId.isValid(token as string)) {
       member = await Member.findById(token as string).select('name qrToken');
     }
-    
+
     if (!member) {
       return res.status(404).json({ message: 'العضو غير موجود أو غير نشط' });
     }
 
-    // Find latest subscription to determine status and expiry
-    const lastSub = await Subscription.findOne({ member: member._id })
-      .sort({ endDate: -1 });
+    const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
 
     let membershipStatus = 'Expired';
     let endDate = null;
@@ -179,21 +224,18 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
       }
     }
 
-    res.json({
-      name: member.name,
-      qrToken: member.qrToken,
-      membershipStatus,
-      endDate,
-    });
+    res.json({ name: member.name, qrToken: member.qrToken, membershipStatus, endDate });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 };
 
+// ─── GET /api/members/:id/qr ──────────────────────────────────────────────────
 export const getMemberQrCode = async (req: Request, res: Response): Promise<any> => {
   try {
-    const member = await Member.findById(req.params.id);
-    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+    const cashier: AuthCashier = (req as any).cashier;
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
 
     if (!member.isQrActive) {
       return res.status(400).json({ message: 'الـ QR الخاص بهذا العضو معطل' });
@@ -206,10 +248,12 @@ export const getMemberQrCode = async (req: Request, res: Response): Promise<any>
   }
 };
 
+// ─── POST /api/members/:id/qr/regenerate ─────────────────────────────────────
 export const regenerateMemberQr = async (req: Request, res: Response): Promise<any> => {
   try {
-    const member = await Member.findById(req.params.id);
-    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+    const cashier: AuthCashier = (req as any).cashier;
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
 
     member.qrToken = crypto.randomBytes(24).toString('hex');
     await member.save();
@@ -221,15 +265,17 @@ export const regenerateMemberQr = async (req: Request, res: Response): Promise<a
   }
 };
 
+// ─── PATCH /api/members/:id/qr ────────────────────────────────────────────────
 export const toggleMemberQr = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { isQrActive } = req.body;
     if (typeof isQrActive !== 'boolean') {
       return res.status(400).json({ message: 'يجب تحديد حالة الـ QR (مفعل/معطل)' });
     }
 
-    const member = await Member.findById(req.params.id);
-    if (!member) return res.status(404).json({ message: 'العضو غير موجود' });
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
 
     member.isQrActive = isQrActive;
     await member.save();
@@ -243,42 +289,37 @@ export const toggleMemberQr = async (req: Request, res: Response): Promise<any> 
 // ─── GET /api/members/:id/profile ────────────────────────────────────────────
 export const getMemberProfile = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { id } = req.params;
 
     const member = await Member.findById(id).select('-__v');
     if (!member) return res.status(404).json({ success: false, message: 'Member not found' });
 
-    // Find latest subscription (regardless of status)
+    // IDOR check
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     const subscription = await Subscription.findOne({ member: id })
       .populate('plan', 'name price')
       .sort({ endDate: -1 });
 
     const subscriptionPayment = subscription ? await Payment.findOne({ subscription: subscription._id }) : null;
 
-    // Attendance this month
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const attendanceCount = await Attendance.countDocuments({
-      member: id,
-      date: { $gte: startOfMonth },
-    });
+    const attendanceCount = await Attendance.countDocuments({ member: id, date: { $gte: startOfMonth } });
 
-    // Last 10 attendances
-    const recentAttendance = await Attendance.find({ member: id })
-      .sort({ checkInTime: -1 })
-      .limit(10);
+    const recentAttendance = await Attendance.find({ member: id }).sort({ checkInTime: -1 }).limit(10);
 
-    // Payment summary
     const payments = await Payment.find({ member: id }).sort({ paymentDate: -1 });
     const totalPaid = payments.reduce((s, p) => s + p.paidAmount, 0);
     const totalRemaining = payments.reduce((s, p) => s + p.remainingAmount, 0);
 
-    // Active workout plan
     const workoutPlan = await WorkoutPlan.findOne({ member: id, status: 'ACTIVE' })
       .populate('trainer', 'name')
       .sort({ createdAt: -1 });
 
-    // Active diet plan
     const dietPlan = await DietPlan.findOne({ member: id, status: 'ACTIVE' })
       .populate('trainer', 'name')
       .sort({ createdAt: -1 });
@@ -288,15 +329,8 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
       member,
       subscription,
       subscriptionPayment,
-      attendance: {
-        thisMonth: attendanceCount,
-        recent: recentAttendance,
-      },
-      payments: {
-        totalPaid,
-        totalRemaining,
-        history: payments,
-      },
+      attendance: { thisMonth: attendanceCount, recent: recentAttendance },
+      payments: { totalPaid, totalRemaining, history: payments },
       workoutPlan,
       dietPlan,
     });

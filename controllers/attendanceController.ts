@@ -4,15 +4,16 @@ import Attendance from '../models/Attendance';
 import Member from '../models/Member';
 import Subscription from '../models/Subscription';
 import { sendWhatsApp, templates } from '../services/whatsapp.service';
+import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
 
-// ─── helper ───────────────────────────────────────────────────────────────────
+const todayString = () => new Date().toISOString().split('T')[0];
 
-const todayString = () => new Date().toISOString().split('T')[0]; // "2026-08-20"
 
 // ─── QR Scan (smart: checkin → checkout toggle) ───────────────────────────────
 
 export const scanQR = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const qrToken = req.body.qrToken || req.body.code || req.body.qrCode;
     if (!qrToken) return res.status(400).json({ success: false, message: 'Missing QR token' });
 
@@ -23,7 +24,12 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     if (!member) {
       return res.status(404).json({ success: false, message: 'Member not found' });
     }
-    
+
+    // SHIFT CHECK — core security: cashier cannot scan members from other shift
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'This member does not belong to your shift' });
+    }
+
     // Check if QR is active
     if (member.isQrActive === false) {
       return res.status(403).json({ success: false, message: 'QR Code is inactive' });
@@ -85,7 +91,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    // Record attendance
+    // Record attendance — denormalize shiftType for fast queries
     const attendanceRecord = await Attendance.create({
       member:      member._id,
       checkInTime: now,
@@ -93,6 +99,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       qrToken:     token,
       method:      'QR',
       status:      'CHECKED_IN',
+      shiftType:   member.shiftType,
     });
 
     // Send WhatsApp Notification (Non-blocking)
@@ -104,32 +111,32 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     return res.status(200).json({
       success: true,
       message: 'Check-in successful',
-      member: {
-        id: member._id,
-        name: member.name
-      },
-      attendance: {
-        checkIn: attendanceRecord.checkInTime,
-        date: attendanceRecord.date
-      }
+      member: { id: member._id, name: member.name },
+      attendance: { checkIn: attendanceRecord.checkInTime, date: attendanceRecord.date }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+
 // ─── Manual check-in (by memberId, for reception use) ────────────────────────
 
 export const checkIn = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId } = req.body;
     if (!memberId) return res.status(400).json({ message: 'معرّف العضو مطلوب' });
 
     const member = await Member.findById(memberId);
     if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
 
-    const today = todayString();
+    // SHIFT CHECK
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ message: 'This member does not belong to your shift' });
+    }
 
+    const today = todayString();
     const existing = await Attendance.findOne({ member: memberId, date: today, status: 'open' });
     if (existing) {
       return res.status(400).json({ message: 'العضو داخل بالفعل، سجّل انصرافه الأول' });
@@ -140,6 +147,7 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
       checkInTime: new Date(),
       date:        today,
       status:      'open',
+      shiftType:   member.shiftType,
     });
 
     res.status(201).json(record);
@@ -187,14 +195,18 @@ export const checkOut = async (req: Request, res: Response): Promise<any> => {
 
 export const getAttendance = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { date, memberId } = req.query;
     const query: any = {};
 
     if (date) {
-      query.date = date as string; // use the indexed string field
+      query.date = date as string;
     }
-
     if (memberId) query.member = memberId;
+
+    // Shift filter — cashier sees only their shift's attendance
+    const shiftFilter = getShiftFilter(cashier);
+    Object.assign(query, shiftFilter);
 
     const records = await Attendance.find(query)
       .populate('member', 'name phone qrToken')
@@ -247,8 +259,10 @@ export const getMemberHistory = async (req: Request, res: Response): Promise<any
 // ─── Get Today's Attendance ───────────────────────────────────────────────────
 export const getTodayAttendance = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const today = todayString();
-    const records = await Attendance.find({ date: today })
+    const shiftFilter = getShiftFilter(cashier);
+    const records = await Attendance.find({ date: today, ...shiftFilter })
       .populate('member', 'name phone qrToken')
       .sort({ checkInTime: -1 });
     res.status(200).json({ success: true, data: records });
@@ -260,38 +274,31 @@ export const getTodayAttendance = async (req: Request, res: Response): Promise<a
 // ─── Get Attendance Statistics ────────────────────────────────────────────────
 export const getAttendanceStats = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const today = todayString();
-    
-    // Cairo Date calculation for beginning of week/month
+    const shiftFilter = getShiftFilter(cashier);
+
     const now = new Date();
     const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
     const cairoDate = new Date(cairoTimeStr);
-    
-    // Start of Month
+
     const startOfMonthDate = new Date(cairoDate.getFullYear(), cairoDate.getMonth(), 1);
     const startOfMonth = startOfMonthDate.getFullYear() + '-' + String(startOfMonthDate.getMonth() + 1).padStart(2, '0') + '-01';
-    
-    // Start of Week (assuming Sunday as start)
+
     const startOfWeekDate = new Date(cairoDate);
     startOfWeekDate.setDate(cairoDate.getDate() - cairoDate.getDay());
     const startOfWeek = startOfWeekDate.getFullYear() + '-' + String(startOfWeekDate.getMonth() + 1).padStart(2, '0') + '-' + String(startOfWeekDate.getDate()).padStart(2, '0');
 
-    const todayCount = await Attendance.countDocuments({ date: today });
-    const monthCount = await Attendance.countDocuments({ date: { $gte: startOfMonth } });
-    const weekCount = await Attendance.countDocuments({ date: { $gte: startOfWeek } });
-    
-    // Average Daily (rough estimate based on days elapsed in month)
+    const todayCount = await Attendance.countDocuments({ date: today, ...shiftFilter });
+    const monthCount = await Attendance.countDocuments({ date: { $gte: startOfMonth }, ...shiftFilter });
+    const weekCount  = await Attendance.countDocuments({ date: { $gte: startOfWeek }, ...shiftFilter });
+
     const daysElapsed = cairoDate.getDate() || 1;
     const averageDaily = Math.round(monthCount / daysElapsed);
 
     res.status(200).json({
       success: true,
-      stats: {
-        today: todayCount,
-        thisWeek: weekCount,
-        thisMonth: monthCount,
-        averageDaily,
-      }
+      stats: { today: todayCount, thisWeek: weekCount, thisMonth: monthCount, averageDaily }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -301,6 +308,7 @@ export const getAttendanceStats = async (req: Request, res: Response): Promise<a
 // ─── Check-In by QR Code (Specific API from prompt requirements) ───────────────────
 export const checkInByQR = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { qrCode } = req.body;
     if (!qrCode) {
       return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
@@ -308,7 +316,6 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
 
     const token = qrCode.trim();
 
-    // 1. Find member by qrToken
     let member = await Member.findOne({ qrToken: token });
     if (!member && mongoose.Types.ObjectId.isValid(token)) {
       member = await Member.findById(token);
@@ -321,65 +328,44 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
       return res.status(400).json({ success: false, message: '❌ Member is Inactive' });
     }
 
-    // Check for frozen subscription
-    const frozenSub = await Subscription.findOne({
-      member: member._id,
-      status: 'frozen',
-    });
-    if (frozenSub) {
-      return res.status(400).json({
-        success: false,
-        message: `❌ Membership Frozen (${member.name})`,
-      });
+    // SHIFT CHECK
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'This member does not belong to your shift' });
     }
 
-    // 2 & 3. Verify that membership is active
+    const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
+    if (frozenSub) {
+      return res.status(400).json({ success: false, message: `❌ Membership Frozen (${member.name})` });
+    }
+
     const activeSub = await Subscription.findOne({
-      member: member._id,
-      status: 'active',
-      endDate: { $gte: new Date() },
+      member: member._id, status: 'active', endDate: { $gte: new Date() },
     });
 
     if (!activeSub) {
-      return res.status(400).json({
-        success: false,
-        message: '❌ Membership Expired',
-        requiresRenewal: true,
-      });
+      return res.status(400).json({ success: false, message: '❌ Membership Expired', requiresRenewal: true });
     }
 
     const today = todayString();
-
-    // 4. Check if checked in today
-    const existing = await Attendance.findOne({
-      member: member._id,
-      date:   today,
-    });
+    const existing = await Attendance.findOne({ member: member._id, date: today });
 
     if (existing) {
       return res.status(400).json({
-        success: false,
-        message: '⚠️ Already Checked In Today',
-        member: member.name,
-        checkInTime: existing.checkInTime,
+        success: false, message: '⚠️ Already Checked In Today',
+        member: member.name, checkInTime: existing.checkInTime,
       });
     }
 
-    // 5. Create attendance record
     const record = await Attendance.create({
       member:      member._id,
       checkInTime: new Date(),
       date:        today,
       qrToken:     token,
       status:      'open',
+      shiftType:   member.shiftType,
     });
 
-    // 6. Return name, check-in time, and success status
-    return res.status(201).json({
-      success: true,
-      member: member.name,
-      checkInTime: record.checkInTime,
-    });
+    return res.status(201).json({ success: true, member: member.name, checkInTime: record.checkInTime });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
