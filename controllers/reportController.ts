@@ -236,11 +236,27 @@ export const getDailyFinancialReport = async (req: Request, res: Response): Prom
   }
 };
 
-// ─── Monthly Report ───────────────────────────────────────────────────────────
+const cleanupOrphanedFinancials = async () => {
+  try {
+    const existingSubIds = await Subscription.distinct('_id');
+    await Promise.all([
+      Transaction.deleteMany({
+        subscriptionId: { $exists: true, $ne: null, $nin: existingSubIds }
+      }),
+      Payment.deleteMany({
+        subscription: { $exists: true, $ne: null, $nin: existingSubIds }
+      })
+    ]);
+  } catch (err) {
+    console.error('Failed to cleanup orphaned financials:', err);
+  }
+};
+
 // ─── Monthly Report ───────────────────────────────────────────────────────────
 // GET /reports/monthly?year=2026&month=8&shiftType=GIRLS
 export const getMonthlyReport = async (req: Request, res: Response): Promise<any> => {
   try {
+    await cleanupOrphanedFinancials();
     const cashier: AuthCashier = (req as any).cashier;
     const activeShift = cashier?.role === 'admin'
       ? (req.query.shiftType as string) || null
@@ -438,6 +454,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
 // GET /reports/daily?date=2026-08-28&shiftType=GIRLS
 export const getDailyReport = async (req: Request, res: Response): Promise<any> => {
   try {
+    await cleanupOrphanedFinancials();
     const cashier: AuthCashier = (req as any).cashier;
     const activeShift = cashier?.role === 'admin'
       ? (req.query.shiftType as string) || null
