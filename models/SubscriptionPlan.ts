@@ -5,6 +5,7 @@ export interface ISubscriptionPlan extends Document {
   durationInDays: number;
   sessionsLimit?: number;
   subscriptionType: 'days' | 'sessions';
+  shiftType: 'GIRLS' | 'BOYS' | 'BOTH';
   price: number;
   description?: string;
   active: boolean;
@@ -18,6 +19,7 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
     durationInDays: { type: Number, required: true },
     sessionsLimit: { type: Number, default: 0 },
     subscriptionType: { type: String, enum: ['days', 'sessions'], default: 'days' },
+    shiftType: { type: String, enum: ['GIRLS', 'BOYS', 'BOTH'], default: 'BOTH' },
     price: { type: Number, required: true },
     description: { type: String },
     active: { type: Boolean, default: true },

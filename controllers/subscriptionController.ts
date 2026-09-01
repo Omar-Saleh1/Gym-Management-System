@@ -12,7 +12,18 @@ import {
 
 export const getPlans = async (req: Request, res: Response): Promise<any> => {
   try {
-    const plans = await SubscriptionPlan.find({ active: true }).sort({ price: 1 });
+    const cashier: AuthCashier = (req as any).cashier;
+    let query: any = { active: true };
+
+    const activeShift = cashier?.role === 'admin'
+      ? (req.query.shiftType as string) || null
+      : (cashier?.shiftType || null);
+
+    if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
+      query.shiftType = { $in: [activeShift, 'BOTH'] };
+    }
+
+    const plans = await SubscriptionPlan.find(query).sort({ price: 1 });
     res.json(plans);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -22,8 +33,8 @@ export const getPlans = async (req: Request, res: Response): Promise<any> => {
 export const createPlan = async (req: Request, res: Response): Promise<any> => {
   try {
     const { name, durationInDays, price } = req.body;
-    if (!name || !durationInDays || !price) {
-      return res.status(400).json({ message: 'الاسم والمدة والسعر مطلوبين' });
+    if (!name || (!durationInDays && req.body.subscriptionType !== 'sessions') || !price) {
+      return res.status(400).json({ message: 'الاسم والسعر مطلوبين' });
     }
     const plan = await SubscriptionPlan.create(req.body);
     res.status(201).json(plan);
@@ -50,7 +61,7 @@ export const deletePlan = async (req: Request, res: Response): Promise<any> => {
       { new: true }
     );
     if (!plan) return res.status(404).json({ message: 'الخطة مش موجودة' });
-    res.json({ message: 'تم إلغاء تفعيل الخطة' });
+    res.json({ message: 'تم حذف الخطة بنجاح' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
