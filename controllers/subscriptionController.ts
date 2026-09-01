@@ -292,8 +292,14 @@ export const deleteSubscription = async (req: Request, res: Response): Promise<a
       return res.status(403).json({ message: 'هذا الاشتراك لا ينتمي لشفتك' });
     }
 
-    await Subscription.findByIdAndDelete(req.params.id);
-    res.json({ message: 'تم حذف الاشتراك بنجاح' });
+    // Cascading delete: delete associated transactions and payments so reports stay clean & accurate
+    await Promise.all([
+      Transaction.deleteMany({ subscriptionId: sub._id }),
+      Payment.deleteMany({ subscription: sub._id }),
+      Subscription.findByIdAndDelete(sub._id),
+    ]);
+
+    res.json({ message: 'تم حذف الاشتراك وسجلاته المالية بنجاح' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
