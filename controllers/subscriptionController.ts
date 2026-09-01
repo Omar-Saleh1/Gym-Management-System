@@ -281,15 +281,19 @@ export const updateSubscription = async (req: Request, res: Response): Promise<a
   }
 };
 
-export const cancelSubscription = async (req: Request, res: Response): Promise<any> => {
+export const deleteSubscription = async (req: Request, res: Response): Promise<any> => {
   try {
-    const subscription = await Subscription.findByIdAndUpdate(
-      req.params.id,
-      { status: 'cancelled' },
-      { new: true }
-    );
-    if (!subscription) return res.status(404).json({ message: 'الاشتراك مش موجود' });
-    res.json({ message: 'تم إلغاء الاشتراك' });
+    const cashier: AuthCashier = (req as any).cashier;
+    const sub = await Subscription.findById(req.params.id).populate('member');
+    if (!sub) return res.status(404).json({ message: 'الاشتراك مش موجود' });
+
+    const member = sub.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ message: 'هذا الاشتراك لا ينتمي لشفتك' });
+    }
+
+    await Subscription.findByIdAndDelete(req.params.id);
+    res.json({ message: 'تم حذف الاشتراك بنجاح' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

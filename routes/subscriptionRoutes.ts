@@ -8,7 +8,7 @@ import {
   getSubscriptions,
   createSubscription,
   updateSubscription,
-  cancelSubscription,
+  deleteSubscription,
   freezeSubscription,
   unfreezeSubscription,
   getExpiringSoon,
@@ -26,7 +26,7 @@ router.get('/expiring-soon', getExpiringSoon);
 router.get('/', getSubscriptions);
 router.post('/', createSubscription);
 router.put('/:id', updateSubscription);
-router.delete('/:id', cancelSubscription);
+router.delete('/:id', deleteSubscription);
 router.post('/:id/freeze', freezeSubscription);
 router.post('/:id/unfreeze', unfreezeSubscription);
 
