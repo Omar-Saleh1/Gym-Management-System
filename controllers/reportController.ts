@@ -237,9 +237,15 @@ export const getDailyFinancialReport = async (req: Request, res: Response): Prom
 };
 
 // ─── Monthly Report ───────────────────────────────────────────────────────────
-// GET /reports/monthly?year=2026&month=8
+// ─── Monthly Report ───────────────────────────────────────────────────────────
+// GET /reports/monthly?year=2026&month=8&shiftType=GIRLS
 export const getMonthlyReport = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const activeShift = cashier?.role === 'admin'
+      ? (req.query.shiftType as string) || null
+      : (cashier?.shiftType || null);
+
     const now = new Date();
     const year  = parseInt(req.query.year  as string) || now.getFullYear();
     const month = parseInt(req.query.month as string) || (now.getMonth() + 1); // 1-based
@@ -258,9 +264,28 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
     const monthStr = `${year}-${String(month).padStart(2, '0')}`; // "2026-08"
     const cashierId = req.query.cashierId as string;
 
+    // Shift scoping: find member IDs belonging to active shift
+    let shiftMemberIds: any[] | null = null;
+    if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
+      const shiftMembers = await Member.find({ shiftType: activeShift }).select('_id');
+      shiftMemberIds = shiftMembers.map(m => m._id);
+    }
+
     const txMatch: any = { date: { $gte: startUtc, $lte: endUtc } };
     const subMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
     const saleMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
+    const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+
+    if (shiftMemberIds) {
+      txMatch.memberId = { $in: shiftMemberIds };
+      subMatch.member = { $in: shiftMemberIds };
+    }
+    if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
+      attendanceMatch.shiftType = activeShift;
+      memberMatch.shiftType = activeShift;
+    }
+
     if (cashierId) {
       txMatch.createdBy = cashierId;
       subMatch.createdBy = cashierId;
@@ -287,9 +312,9 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
         .populate('member', 'name phone')
         .populate('plan', 'name price'),
       // New members registered this month
-      Member.find({ createdAt: { $gte: startUtc, $lte: endUtc } }).select('name phone createdAt'),
+      Member.find(memberMatch).select('name phone createdAt'),
       // Attendance this month
-      Attendance.find({ checkInTime: { $gte: startUtc, $lte: endUtc } })
+      Attendance.find(attendanceMatch)
         .populate('member', 'name'),
       // Expenses this month
       Expense.find({ date: { $gte: startUtc, $lte: endUtc } }),
@@ -376,6 +401,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       success: true,
       data: {
         period: { year, month, monthStr, daysInMonth },
+        shiftType: activeShift,
         financial: { totalIncome, totalExpense, netProfit, salesRevenue, subscriptionRevenue },
         incomeByCategory,
         expenseByCategory,
@@ -409,9 +435,14 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
 };
 
 // ─── Daily Report ──────────────────────────────────────────────────────────────
-// GET /reports/daily?date=2026-08-28
+// GET /reports/daily?date=2026-08-28&shiftType=GIRLS
 export const getDailyReport = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const activeShift = cashier?.role === 'admin'
+      ? (req.query.shiftType as string) || null
+      : (cashier?.shiftType || null);
+
     const dateParam = req.query.date as string;
 
     // Parse target date in Cairo time
@@ -441,9 +472,29 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
 
     const cashierId = req.query.cashierId as string;
 
+    // Shift scoping: find member IDs belonging to active shift
+    let shiftMemberIds: any[] | null = null;
+    if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
+      const shiftMembers = await Member.find({ shiftType: activeShift }).select('_id');
+      shiftMemberIds = shiftMembers.map(m => m._id);
+    }
+
     const txMatch: any = { date: { $gte: startUtc, $lte: endUtc } };
     const paymentMatch: any = { paymentDate: { $gte: startUtc, $lte: endUtc } };
     const subMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
+    const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+
+    if (shiftMemberIds) {
+      txMatch.memberId = { $in: shiftMemberIds };
+      subMatch.member = { $in: shiftMemberIds };
+      paymentMatch.member = { $in: shiftMemberIds };
+    }
+    if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
+      attendanceMatch.shiftType = activeShift;
+      memberMatch.shiftType = activeShift;
+    }
+
     if (cashierId) {
       txMatch.createdBy = cashierId;
       paymentMatch.createdBy = cashierId;
@@ -469,11 +520,11 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
         .populate('member', 'name phone')
         .populate('plan', 'name price'),
       // Attendance today
-      Attendance.find({ checkInTime: { $gte: startUtc, $lte: endUtc } })
+      Attendance.find(attendanceMatch)
         .populate('member', 'name phone')
         .sort({ checkInTime: -1 }),
       // New members registered today
-      Member.find({ createdAt: { $gte: startUtc, $lte: endUtc } }).select('name phone'),
+      Member.find(memberMatch).select('name phone'),
       // Payments that were SETTLED (fully or partially) today — paymentDate updated today
       Payment.find(paymentMatch)
         .populate('member', 'name phone')
@@ -508,6 +559,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       success: true,
       data: {
         date: dateStr,
+        shiftType: activeShift,
         financial: { totalIncome, totalExpense, netProfit },
         incomeByCategory,
         expenseByCategory,
