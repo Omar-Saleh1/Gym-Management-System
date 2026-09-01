@@ -26,7 +26,10 @@ export const login = async (req: Request, res: Response): Promise<any> => {
       return res.status(400).json({ message: 'اليوزرنيم والباسورد مطلوبين' });
     }
 
-    const cashier = await Cashier.findOne({ username: username.trim() });
+    const cleanUsername = username.trim();
+    const cashier = await Cashier.findOne({
+      username: new RegExp('^' + cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')
+    });
     if (!cashier || !cashier.active) {
       return res.status(401).json({ message: 'يوزر أو باسورد غلط' });
     }

@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface ISubscriptionPlan extends Document {
   name: string;
   durationInDays: number;
+  sessionsLimit?: number;
+  subscriptionType: 'days' | 'sessions';
   price: number;
   description?: string;
   active: boolean;
@@ -14,6 +16,8 @@ const subscriptionPlanSchema = new Schema<ISubscriptionPlan>(
   {
     name: { type: String, required: true },
     durationInDays: { type: Number, required: true },
+    sessionsLimit: { type: Number, default: 0 },
+    subscriptionType: { type: String, enum: ['days', 'sessions'], default: 'days' },
     price: { type: Number, required: true },
     description: { type: String },
     active: { type: Boolean, default: true },

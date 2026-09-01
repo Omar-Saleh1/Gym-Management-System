@@ -12,6 +12,9 @@ export interface ISubscription extends Document {
   paymentMethod: string;
   notes?: string;
   status: 'active' | 'expired' | 'cancelled' | 'frozen';
+  subscriptionType: 'days' | 'sessions';
+  sessionsLimit: number;
+  sessionsUsed: number;
   freezeStartDate?: Date;
   freezeEndDate?: Date;
   createdBy?: mongoose.Types.ObjectId | ICashier;
@@ -29,6 +32,9 @@ const subscriptionSchema = new Schema<ISubscription>(
     paymentMethod: { type: String, default: 'cash' },
     notes: { type: String, default: '' },
     status: { type: String, enum: ['active', 'expired', 'cancelled', 'frozen'], default: 'active' },
+    subscriptionType: { type: String, enum: ['days', 'sessions'], default: 'days' },
+    sessionsLimit: { type: Number, default: 0 },
+    sessionsUsed: { type: Number, default: 0 },
     freezeStartDate: { type: Date },
     freezeEndDate: { type: Date },
     createdBy: { type: Schema.Types.ObjectId, ref: 'Cashier' },
@@ -37,3 +43,4 @@ const subscriptionSchema = new Schema<ISubscription>(
 );
 
 export default mongoose.model<ISubscription>('Subscription', subscriptionSchema);
+

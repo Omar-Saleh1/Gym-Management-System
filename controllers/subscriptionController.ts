@@ -166,7 +166,11 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
 
     const startDate = new Date();
     const endDate = new Date();
-    endDate.setDate(endDate.getDate() + plan.durationInDays);
+
+    // Session-based: give 30-day window regardless; expiry is controlled by sessionsUsed >= sessionsLimit
+    // Days-based: use plan.durationInDays
+    const isSessions = plan.subscriptionType === 'sessions';
+    endDate.setDate(endDate.getDate() + (isSessions ? 30 : plan.durationInDays));
 
     const subscription = await Subscription.create({
       member: memberId,
@@ -177,6 +181,9 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       paymentMethod: paymentMethod || 'CASH',
       createdBy: (req as any).cashier.id || (req as any).cashier._id,
       notes: req.body.notes || '',
+      subscriptionType: plan.subscriptionType || 'days',
+      sessionsLimit: isSessions ? (plan.sessionsLimit || 0) : 0,
+      sessionsUsed: 0,
     });
 
     // Reactivate Member QR automatically
@@ -218,7 +225,7 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
 
     const populated = await subscription.populate([
       { path: 'member', select: 'name phone qrToken active' },
-      { path: 'plan', select: 'name durationInDays price' },
+      { path: 'plan', select: 'name durationInDays price subscriptionType sessionsLimit' },
     ]);
 
     // Skip notification for Day Pass (1 day duration)
@@ -246,6 +253,7 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
     res.status(500).json({ message: err.message });
   }
 };
+
 
 export const updateSubscription = async (req: Request, res: Response): Promise<any> => {
   try {

@@ -78,6 +78,19 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
+    // Session-based: check remaining sessions BEFORE recording attendance
+    if (lastSub.subscriptionType === 'sessions' && lastSub.sessionsLimit > 0) {
+      if (lastSub.sessionsUsed >= lastSub.sessionsLimit) {
+        // Exhausted — mark expired
+        lastSub.status = 'expired';
+        await lastSub.save();
+        return res.status(422).json({
+          success: false,
+          message: `انتهت حصصك (${lastSub.sessionsLimit}/${lastSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+        });
+      }
+    }
+
     // Check if checked in today
     const existing = await Attendance.findOne({
       member: member._id,
@@ -102,6 +115,18 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       shiftType:   member.shiftType,
     });
 
+    // Session-based: increment sessionsUsed after successful check-in
+    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number } = {};
+    if (lastSub.subscriptionType === 'sessions' && lastSub.sessionsLimit > 0) {
+      lastSub.sessionsUsed = (lastSub.sessionsUsed || 0) + 1;
+      // If this was the last session, expire automatically
+      if (lastSub.sessionsUsed >= lastSub.sessionsLimit) {
+        lastSub.status = 'expired';
+      }
+      await lastSub.save();
+      sessionInfo = { sessionsUsed: lastSub.sessionsUsed, sessionsLimit: lastSub.sessionsLimit };
+    }
+
     // Send WhatsApp Notification (Non-blocking)
     if (member.phone) {
       const timeStr = cairoTime.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -112,12 +137,14 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       success: true,
       message: 'Check-in successful',
       member: { id: member._id, name: member.name },
-      attendance: { checkIn: attendanceRecord.checkInTime, date: attendanceRecord.date }
+      attendance: { checkIn: attendanceRecord.checkInTime, date: attendanceRecord.date },
+      ...(sessionInfo.sessionsLimit ? { sessionInfo } : {}),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 
 // ─── Manual check-in (by memberId, for reception use) ────────────────────────
