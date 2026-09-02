@@ -32,7 +32,7 @@ export const getMembers = async (req: Request, res: Response): Promise<any> => {
 
     // Shift filter — admin sees all, cashier sees their shift
     const shiftFilter = getShiftFilter(cashier);
-    const baseQuery = { active: true, ...shiftFilter };
+    const baseQuery = { active: { $ne: false }, ...shiftFilter };
 
     const query = search
       ? {

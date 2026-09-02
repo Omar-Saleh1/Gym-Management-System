@@ -17,16 +17,16 @@ export interface AuthCashier {
  */
 export const getShiftFilter = (cashier: AuthCashier): Record<string, any> => {
   if (!cashier.shiftType || cashier.role === 'admin') return {};
-  return { shiftType: cashier.shiftType };
+  return { shiftType: { $in: [cashier.shiftType, 'unassigned', null, undefined] } };
 };
 
 /**
  * Returns true if the cashier is allowed to access a record with the given shiftType.
- * Admin is always allowed. Cashier must match.
+ * Admin is always allowed. Cashier must match or record must be unassigned.
  */
 export const canAccessShift = (cashier: AuthCashier, recordShiftType: string): boolean => {
   if (!cashier.shiftType || cashier.role === 'admin') return true;
-  return cashier.shiftType === recordShiftType;
+  return cashier.shiftType === recordShiftType || recordShiftType === 'unassigned' || !recordShiftType;
 };
 
 export const protect = (req: Request, res: Response, next: NextFunction): any => {
