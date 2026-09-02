@@ -11,9 +11,9 @@ const router = express.Router();
 
 router.use(protect);
 
-// Financial Security: Admin only
+// Financial Security: Admin only (except pay-remaining which all cashiers can use)
 router.post('/', adminOnly, createPayment);
-router.post('/:id/pay-remaining', adminOnly, payRemaining);
+router.post('/:id/pay-remaining', payRemaining);
 router.get('/', adminOnly, getPayments);
 router.get('/dashboard', adminOnly, getRevenueDashboard);
 
