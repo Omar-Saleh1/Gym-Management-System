@@ -164,9 +164,9 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
     }
 
     const today = todayString();
-    const existing = await Attendance.findOne({ member: memberId, date: today, status: 'open' });
+    const existing = await Attendance.findOne({ member: memberId, date: today });
     if (existing) {
-      return res.status(400).json({ message: 'العضو داخل بالفعل، سجّل انصرافه الأول' });
+      return res.status(400).json({ message: '⚠️ هذا العضو مسجّل حضور بالفعل اليوم! لا يمكن تسجيل الحضور أكثر من مرة في اليوم الواحد.' });
     }
 
     const record = await Attendance.create({
@@ -395,6 +395,42 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
     return res.status(201).json({ success: true, member: member.name, checkInTime: record.checkInTime });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── Delete Attendance Record ───────────────────────────────────────────────────
+export const deleteAttendance = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const { id } = req.params;
+
+    const record = await Attendance.findById(id).populate('member');
+    if (!record) {
+      return res.status(404).json({ success: false, message: 'سجل الحضور غير موجود' });
+    }
+
+    const member = record.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'هذا السجل لا ينتمي لشفتك' });
+    }
+
+    // If session-based subscription, restore 1 session
+    if (member) {
+      const sub = await Subscription.findOne({ member: member._id, subscriptionType: 'sessions' }).sort({ endDate: -1 });
+      if (sub && sub.sessionsUsed > 0) {
+        sub.sessionsUsed = Math.max(0, sub.sessionsUsed - 1);
+        if (sub.status === 'expired' && sub.sessionsUsed < sub.sessionsLimit) {
+          sub.status = 'active';
+        }
+        await sub.save();
+      }
+    }
+
+    await Attendance.findByIdAndDelete(id);
+
+    return res.status(200).json({ success: true, message: 'تم حذف سجل الحضور بنجاح' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 

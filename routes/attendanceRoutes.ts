@@ -8,7 +8,8 @@ import {
   getMemberHistory,
   checkInByQR,
   getTodayAttendance,
-  getAttendanceStats
+  getAttendanceStats,
+  deleteAttendance,
 } from '../controllers/attendanceController';
 
 const router = express.Router();
@@ -24,6 +25,7 @@ router.post('/checkin',            checkIn);
 router.post('/check-in',           checkInByQR);
 router.post('/checkout',           checkOut);
 router.put('/checkout/:memberId',  checkOut);
+router.delete('/:id',              deleteAttendance);
 
 export default router;
 
