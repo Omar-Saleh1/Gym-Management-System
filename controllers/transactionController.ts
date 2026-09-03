@@ -64,7 +64,10 @@ export const getTransactions = async (req: Request, res: Response): Promise<any>
     const memberShiftFilter = getShiftFilter(cashier);
     if (Object.keys(memberShiftFilter).length > 0) {
       const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
-      query.memberId = { $in: shiftMembers.map(m => m._id) };
+      query.$or = [
+        { memberId: { $in: shiftMembers.map(m => m._id) } },
+        { shiftType: cashier.shiftType },
+      ];
     }
 
     if (dateRange || from || to) {
@@ -101,7 +104,10 @@ export const getTransactionsDashboard = async (req: Request, res: Response): Pro
     const memberShiftFilter = getShiftFilter(cashier);
     if (Object.keys(memberShiftFilter).length > 0) {
       const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
-      cashierMatch.memberId = { $in: shiftMembers.map(m => m._id) };
+      cashierMatch.$or = [
+        { memberId: { $in: shiftMembers.map(m => m._id) } },
+        { shiftType: cashier.shiftType },
+      ];
     }
 
     // Cairo Current Month Start

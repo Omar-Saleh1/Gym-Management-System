@@ -7,6 +7,7 @@ import Expense from '../models/Expense';
 import CoachSalary from '../models/CoachSalary';
 import Transaction from '../models/Transaction';
 import Payment from '../models/Payment';
+import SingleVisit from '../models/SingleVisit';
 import { getShiftFilter, AuthCashier } from '../middleware/auth';
 
 
@@ -39,7 +40,9 @@ export const getDashboard = async (req: Request, res: Response): Promise<any> =>
       memberFilter = { member: { $in: shiftMembers.map(m => m._id) } };
     }
 
-    const [todaySales, totalMembers, activeSubscriptions, expiringSoon, todayAttendance] =
+    const visitShiftFilter = cashier?.role !== 'admin' && cashier?.shiftType ? { shiftType: cashier.shiftType } : {};
+
+    const [todaySales, totalMembers, activeSubscriptions, expiringSoon, todayAttendance, todaySingleVisits] =
       await Promise.all([
         Sale.find({ createdAt: { $gte: today, $lt: tomorrow }, ...(cashier?.id ? { cashier: cashier.id } : {}) }),
         Member.countDocuments({ active: true, ...shiftFilter }),
@@ -50,13 +53,17 @@ export const getDashboard = async (req: Request, res: Response): Promise<any> =>
           ...memberFilter,
         }),
         Attendance.countDocuments({ checkInTime: { $gte: today, $lt: tomorrow }, ...shiftFilter }),
+        SingleVisit.find({ visitedAt: { $gte: today, $lt: tomorrow }, ...visitShiftFilter }),
       ]);
 
     const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
+    const todaySingleVisitsRevenue = todaySingleVisits.reduce((sum, v) => sum + (v.amount || 0), 0);
 
     res.json({
       todayRevenue,
       todaySalesCount: todaySales.length,
+      todaySingleVisitsCount: todaySingleVisits.length,
+      todaySingleVisitsRevenue,
       totalMembers,
       activeSubscriptions,
       expiringSoon,
@@ -292,20 +299,26 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
     const saleMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
     const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
     const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const singleVisitMatch: any = { visitedAt: { $gte: startUtc, $lte: endUtc } };
 
     if (shiftMemberIds) {
-      txMatch.memberId = { $in: shiftMemberIds };
+      txMatch.$or = [
+        { memberId: { $in: shiftMemberIds } },
+        { shiftType: activeShift },
+      ];
       subMatch.member = { $in: shiftMemberIds };
     }
     if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
       attendanceMatch.shiftType = activeShift;
       memberMatch.shiftType = activeShift;
+      singleVisitMatch.shiftType = activeShift;
     }
 
     if (cashierId) {
       txMatch.createdBy = cashierId;
       subMatch.createdBy = cashierId;
       saleMatch.cashier = cashierId;
+      singleVisitMatch.createdBy = cashierId;
     }
 
     // ── Parallel queries ──────────────────────────────────────────────────────
@@ -317,6 +330,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       expenses,
       coachSalaries,
       sales,
+      singleVisits,
     ] = await Promise.all([
       // All transactions in the month
       Transaction.find(txMatch)
@@ -331,13 +345,16 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       Member.find(memberMatch).select('name phone createdAt'),
       // Attendance this month
       Attendance.find(attendanceMatch)
-        .populate('member', 'name'),
+        .populate('member', 'name phone')
+        .sort({ checkInTime: 1 }),
       // Expenses this month
-      Expense.find({ date: { $gte: startUtc, $lte: endUtc } }),
+      Expense.find(txMatch.createdBy ? { createdBy: cashierId, date: { $gte: startUtc, $lte: endUtc } } : { date: { $gte: startUtc, $lte: endUtc } }),
       // Coach salaries for this month
       CoachSalary.find({ month: monthStr }).populate('coach', 'name'),
       // Cashier sales this month
       Sale.find(saleMatch),
+      // Single visits this month
+      SingleVisit.find(singleVisitMatch).populate('createdBy', 'name'),
     ]);
 
     // ── Financial Summary ─────────────────────────────────────────────────────
@@ -428,6 +445,11 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
           statusBreakdown: subStatusBreakdown,
           list: subscriptions,
         },
+        singleVisits: {
+          count: singleVisits.length,
+          revenue: singleVisits.reduce((acc, v) => acc + (v.amount || 0), 0),
+          list: singleVisits,
+        },
         members: {
           newCount: newMembers.length,
           list: newMembers,
@@ -506,21 +528,27 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
     };
     const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
     const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const singleVisitMatch: any = { visitedAt: { $gte: startUtc, $lte: endUtc } };
 
     if (shiftMemberIds) {
-      txMatch.memberId = { $in: shiftMemberIds };
+      txMatch.$or = [
+        { memberId: { $in: shiftMemberIds } },
+        { shiftType: activeShift },
+      ];
       subMatch.member = { $in: shiftMemberIds };
       paymentMatch.member = { $in: shiftMemberIds };
     }
     if (activeShift && (activeShift === 'GIRLS' || activeShift === 'BOYS')) {
       attendanceMatch.shiftType = activeShift;
       memberMatch.shiftType = activeShift;
+      singleVisitMatch.shiftType = activeShift;
     }
 
     if (cashierId) {
       txMatch.createdBy = cashierId;
       paymentMatch.createdBy = cashierId;
       subMatch.createdBy = cashierId;
+      singleVisitMatch.createdBy = cashierId;
     }
 
     // ── Parallel queries ──────────────────────────────────────────────────────
@@ -530,6 +558,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       attendanceRecords,
       newMembers,
       settledPayments,
+      singleVisits,
     ] = await Promise.all([
       // All transactions for this day
       Transaction.find(txMatch)
@@ -552,12 +581,19 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
         .populate('member', 'name phone')
         .populate('createdBy', 'name')
         .sort({ paymentDate: -1 }),
+      // Single visits today
+      SingleVisit.find(singleVisitMatch)
+        .populate('createdBy', 'name')
+        .sort({ visitedAt: -1 }),
     ]);
 
     // ── Financials ────────────────────────────────────────────────────────────
     const totalIncome  = transactions.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + t.amount, 0);
     const totalExpense = transactions.filter((t: any) => t.type === 'expense').reduce((s: number, t: any) => s + t.amount, 0);
     const netProfit    = totalIncome - totalExpense;
+
+    // Single visits revenue
+    const singleVisitsRevenue = singleVisits.reduce((sum, v) => sum + (v.amount || 0), 0);
 
     // Income breakdown by category
     const incomeByCategory: Record<string, number> = {};
@@ -582,13 +618,18 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       data: {
         date: dateStr,
         shiftType: activeShift,
-        financial: { totalIncome, totalExpense, netProfit },
+        financial: { totalIncome, totalExpense, netProfit, singleVisitsRevenue },
         incomeByCategory,
         expenseByCategory,
         transactions,
         subscriptions: {
           count: subscriptions.length,
           list: subscriptions,
+        },
+        singleVisits: {
+          count: singleVisits.length,
+          revenue: singleVisitsRevenue,
+          list: singleVisits,
         },
         attendance: {
           totalVisits: attendanceRecords.length,

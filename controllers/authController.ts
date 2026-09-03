@@ -29,7 +29,7 @@ const generateToken = (cashier: any) => {
       shiftType: cashier.shiftType || null, // null = admin/trainer (no shift restriction)
     },
     JWT_SECRET,
-    { expiresIn }
+    { expiresIn } as any
   );
 };
 

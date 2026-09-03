@@ -21,6 +21,7 @@ import workoutRoutes       from './routes/workoutRoutes';
 import dietRoutes          from './routes/dietRoutes';
 import coachRoutes         from './routes/coachRoutes';
 import transactionRoutes   from './routes/transactionRoutes';
+import singleVisitRoutes   from './routes/singleVisitRoutes';
 
 const app: Application = express();
 
@@ -52,6 +53,7 @@ app.use('/api/workout-plans', workoutRoutes);
 app.use('/api/diet-plans',    dietRoutes);
 app.use('/api/coaches',       coachRoutes);
 app.use('/api/transactions',  transactionRoutes);
+app.use('/api/single-visits', singleVisitRoutes);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);

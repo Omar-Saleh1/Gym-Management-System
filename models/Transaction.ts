@@ -6,10 +6,13 @@ import { ICashier } from './Cashier';
 
 export interface ITransaction extends Document {
   type: 'income' | 'expense';
-  category: 'subscription' | 'renewal' | 'coach_salary' | 'rent' | 'equipment' | 'electricity' | 'water' | 'maintenance' | 'other';
+  category: 'subscription' | 'single_visit' | 'renewal' | 'coach_salary' | 'rent' | 'equipment' | 'electricity' | 'water' | 'maintenance' | 'other' | string;
   amount: number;
   date: Date;
   memberId?: mongoose.Types.ObjectId | IMember;
+  singleVisitId?: mongoose.Types.ObjectId;
+  customerName?: string;
+  shiftType?: 'GIRLS' | 'BOYS';
   subscriptionId?: mongoose.Types.ObjectId | ISubscription;
   paymentId?: mongoose.Types.ObjectId | IPayment;
   coachId?: mongoose.Types.ObjectId; // We will refer to Coach model
@@ -29,6 +32,9 @@ const transactionSchema = new Schema<ITransaction>(
     amount: { type: Number, required: true, min: 0 },
     date: { type: Date, default: Date.now },
     memberId: { type: Schema.Types.ObjectId, ref: 'Member' },
+    singleVisitId: { type: Schema.Types.ObjectId, ref: 'SingleVisit' },
+    customerName: { type: String },
+    shiftType: { type: String, enum: ['GIRLS', 'BOYS'] },
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription' },
     paymentId: { type: Schema.Types.ObjectId, ref: 'Payment' },
     coachId: { type: Schema.Types.ObjectId, ref: 'Coach' },

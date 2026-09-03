@@ -171,7 +171,12 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
 
     const buildTxMatch = (dateFilter: any) => {
       const match: any = { ...dateFilter, type: 'income' };
-      if (hasMemberFilter) match.memberId = { $in: memberIds };
+      if (hasMemberFilter) {
+        match.$or = [
+          { memberId: { $in: memberIds } },
+          { shiftType: cashier.shiftType },
+        ];
+      }
       return match;
     };
 
