@@ -22,7 +22,7 @@ export interface IMember extends Document {
 const memberSchema = new Schema<IMember>(
   {
     name:        { type: String, required: true },
-    phone:       { type: String, default: '' },
+    phone:       { type: String, required: true },
     email:       { type: String },
     gender:      { type: String, enum: ['male', 'female'], default: 'male' },
     dateOfBirth: { type: Date },
