@@ -175,8 +175,11 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       return res.status(400).json({ message: 'المبلغ المدفوع لا يمكن أن يكون أكبر من المبلغ المطلوب' });
     }
 
-    const startDate = new Date();
-    const endDate = new Date();
+    // Admin can backdate by passing a custom startDate; everyone else uses now
+    const startDate = (cashier.role === 'admin' && req.body.startDate)
+      ? new Date(req.body.startDate)
+      : new Date();
+    const endDate = new Date(startDate);
 
     // Session-based: give 30-day window regardless; expiry is controlled by sessionsUsed >= sessionsLimit
     // Days-based: use plan.durationInDays
@@ -224,7 +227,7 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
         type: 'income',
         category: 'subscription',
         amount: paidAmount,
-        date: new Date(),
+        date: startDate,
         memberId,
         subscriptionId: subscription._id,
         paymentId: payment._id,
