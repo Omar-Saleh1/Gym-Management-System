@@ -27,6 +27,11 @@ interface SendOptions {
 export async function sendNotification(opts: SendOptions): Promise<boolean> {
   const { member, type, message, referenceId, metadata } = opts;
 
+  if (!member || !member.phone || member.phone.trim() === '') {
+    console.log(`[Notification] Skipped (No phone number): ${type} for ${member?.name || 'Unknown'}`);
+    return false;
+  }
+
   // Deduplication: don't send the same notification twice today
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);

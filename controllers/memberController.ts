@@ -75,28 +75,20 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
   try {
     const cashier: AuthCashier = (req as any).cashier;
     const { name, phone, email } = req.body;
-    if (!name || !phone) {
-      return res.status(400).json({ message: 'الاسم والتليفون مطلوبين' });
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ message: 'الاسم مطلوب ويجب أن يكون حرفين على الأقل' });
     }
 
-    if (name.trim().length < 3) {
-      return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
-    }
+    const cleanPhone = phone ? phone.trim() : '';
+    if (cleanPhone !== '') {
+      const phoneRegex = /^01[0125]\d{8}$/;
+      if (!phoneRegex.test(cleanPhone)) {
+        return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
+      }
 
-    const phoneRegex = /^01[0125]\d{8}$/;
-    if (!phoneRegex.test(phone.trim())) {
-      return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
-    }
-
-    const existingPhone = await Member.findOne({ phone: phone.trim(), active: true });
-    if (existingPhone) {
-      return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
-    }
-
-    if (email && email.trim() !== '') {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email.trim())) {
-        return res.status(400).json({ message: 'البريد الإلكتروني غير صحيح' });
+      const existingPhone = await Member.findOne({ phone: cleanPhone, active: true });
+      if (existingPhone) {
+        return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
       }
     }
 
@@ -109,7 +101,7 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
     const member = await Member.create({
       ...safeBody,
       name: name.trim(),
-      phone: phone.trim(),
+      phone: cleanPhone,
       email: email ? email.trim() : undefined,
       shiftType: assignedShiftType,
     });
@@ -129,22 +121,25 @@ export const updateMember = async (req: Request, res: Response): Promise<any> =>
     const member = await assertShiftAccess(cashier, req.params.id, res);
     if (!member) return;
 
-    if (name && name.trim().length < 3) {
-      return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من 3 حروف على الأقل' });
+    if (name && name.trim().length < 2) {
+      return res.status(400).json({ message: 'الاسم يجب أن يكون مكون من حرفين على الأقل' });
     }
 
-    if (phone) {
-      const phoneRegex = /^01[0125]\d{8}$/;
-      if (!phoneRegex.test(phone.trim())) {
-        return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
-      }
-      const existingPhone = await Member.findOne({
-        phone: phone.trim(),
-        active: true,
-        _id: { $ne: req.params.id },
-      });
-      if (existingPhone) {
-        return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
+    if (phone !== undefined && phone !== null) {
+      const cleanPhone = phone.trim();
+      if (cleanPhone !== '') {
+        const phoneRegex = /^01[0125]\d{8}$/;
+        if (!phoneRegex.test(cleanPhone)) {
+          return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
+        }
+        const existingPhone = await Member.findOne({
+          phone: cleanPhone,
+          active: true,
+          _id: { $ne: req.params.id },
+        });
+        if (existingPhone) {
+          return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
+        }
       }
     }
 
