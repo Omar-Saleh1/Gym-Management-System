@@ -176,8 +176,9 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
     }
 
     // Admin or BOYS shift cashier can backdate by passing a custom startDate; everyone else uses now
+    // Use T12:00:00Z (noon UTC) to prevent timezone off-by-one-day issues
     const startDate = ((cashier.role === 'admin' || cashier.shiftType === 'BOYS') && req.body.startDate)
-      ? new Date(req.body.startDate)
+      ? new Date(`${req.body.startDate}T12:00:00.000Z`)
       : new Date();
     const endDate = new Date(startDate);
 
@@ -218,6 +219,7 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       remainingAmount,
       paymentMethod: paymentMethod || 'CASH',
       status: paymentStatus,
+      paymentDate: startDate,
       createdBy: (req as any).cashier.id || (req as any).cashier._id,
       notes: req.body.notes || '',
     });

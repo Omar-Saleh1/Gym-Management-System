@@ -498,7 +498,12 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
 
     const txMatch: any = { date: { $gte: startUtc, $lte: endUtc } };
     const paymentMatch: any = { paymentDate: { $gte: startUtc, $lte: endUtc } };
-    const subMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
+    const subMatch: any = {
+      $or: [
+        { startDate: { $gte: startUtc, $lte: endUtc } },
+        { createdAt: { $gte: startUtc, $lte: endUtc } },
+      ],
+    };
     const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
     const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
 
