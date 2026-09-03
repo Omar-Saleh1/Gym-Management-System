@@ -175,8 +175,8 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       return res.status(400).json({ message: 'المبلغ المدفوع لا يمكن أن يكون أكبر من المبلغ المطلوب' });
     }
 
-    // Admin can backdate by passing a custom startDate; everyone else uses now
-    const startDate = (cashier.role === 'admin' && req.body.startDate)
+    // Admin or BOYS shift cashier can backdate by passing a custom startDate; everyone else uses now
+    const startDate = ((cashier.role === 'admin' || cashier.shiftType === 'BOYS') && req.body.startDate)
       ? new Date(req.body.startDate)
       : new Date();
     const endDate = new Date(startDate);
