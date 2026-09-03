@@ -5,8 +5,22 @@ import Cashier from '../models/Cashier';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret_key_in_production';
 
-const generateToken = (cashier: any) =>
-  jwt.sign(
+const generateToken = (cashier: any) => {
+  let expiresIn: string | number = '12h';
+
+  if (cashier.shiftType === 'BOYS') {
+    // Token expires exactly at 2:00 AM for BOYS shift
+    const now = new Date();
+    const target = new Date();
+    target.setHours(2, 0, 0, 0);
+    if (target <= now) {
+      // Already past 2 AM today → expire at 2 AM tomorrow
+      target.setDate(target.getDate() + 1);
+    }
+    expiresIn = Math.floor((target.getTime() - now.getTime()) / 1000);
+  }
+
+  return jwt.sign(
     {
       id: cashier._id,
       username: cashier.username,
@@ -15,8 +29,9 @@ const generateToken = (cashier: any) =>
       shiftType: cashier.shiftType || null, // null = admin/trainer (no shift restriction)
     },
     JWT_SECRET,
-    { expiresIn: '12h' }
+    { expiresIn }
   );
+};
 
 export const login = async (req: Request, res: Response): Promise<any> => {
   try {
