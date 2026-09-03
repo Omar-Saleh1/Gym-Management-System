@@ -1,4 +1,4 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import SingleVisit from '../models/SingleVisit';
 import Transaction from '../models/Transaction';
 import { AuthCashier, canAccessShift, getShiftFilter } from '../middleware/auth';
@@ -32,7 +32,7 @@ const getCairoDayBounds = (dateStr?: string) => {
 export const createSingleVisit = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const { name, phone, amount, paymentMethod, notes, visitDate } = req.body;
+    const { name, sessionName, phone, amount, paymentMethod, notes, visitDate } = req.body;
 
     if (!name || name.trim().length < 2) {
       return res.status(400).json({ success: false, message: 'الاسم مطلوب ويجب أن يكون حرفين على الأقل' });
@@ -51,6 +51,8 @@ export const createSingleVisit = async (req: Request, res: Response): Promise<an
       }
     }
 
+    const cleanSessionName = (sessionName && sessionName.trim()) ? sessionName.trim() : 'حصة عامة';
+
     // Shift Isolation: Backend always sets shiftType from JWT
     let assignedShiftType: 'GIRLS' | 'BOYS' = 'BOYS';
     if (cashier.role === 'admin') {
@@ -68,6 +70,7 @@ export const createSingleVisit = async (req: Request, res: Response): Promise<an
 
     const singleVisit = await SingleVisit.create({
       name: name.trim(),
+      sessionName: cleanSessionName,
       phone: cleanPhone,
       amount: numAmount,
       paymentMethod: paymentMethod || 'CASH',
@@ -87,7 +90,7 @@ export const createSingleVisit = async (req: Request, res: Response): Promise<an
       customerName: name.trim(),
       shiftType: assignedShiftType,
       paymentMethod: paymentMethod || 'CASH',
-      description: `حصة فردية - ${name.trim()} (${assignedShiftType === 'GIRLS' ? 'شفت بنات' : 'شفت شباب'})`,
+      description: `حصة فردية (${cleanSessionName}) - ${name.trim()} (${assignedShiftType === 'GIRLS' ? 'شفت بنات' : 'شفت شباب'})`,
       createdBy: cashier.id,
       notes: notes ? notes.trim() : '',
     });

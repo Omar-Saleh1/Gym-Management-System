@@ -1,9 +1,10 @@
-﻿import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 import { ICashier } from './Cashier';
 import { ITransaction } from './Transaction';
 
 export interface ISingleVisit extends Document {
   name: string;
+  sessionName?: string;
   phone?: string;
   amount: number;
   paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'OTHER';
@@ -19,6 +20,7 @@ export interface ISingleVisit extends Document {
 const singleVisitSchema = new Schema<ISingleVisit>(
   {
     name:          { type: String, required: true, trim: true },
+    sessionName:   { type: String, trim: true, default: 'حصة عامة' },
     phone:         { type: String, trim: true, default: '' },
     amount:        { type: Number, required: true, min: 1 },
     paymentMethod: { type: String, enum: ['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'], default: 'CASH' },
