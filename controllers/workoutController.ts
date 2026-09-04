@@ -2,9 +2,11 @@ import { Request, Response } from 'express';
 import WorkoutPlan from '../models/WorkoutPlan';
 import Member from '../models/Member';
 import { sendNotification } from '../services/notification.service';
+import { canAccessShift, AuthCashier } from '../middleware/auth';
 
 export const createWorkoutPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId, planName, goal, duration, startDate, endDate, days, notes } = req.body;
     
     if (!memberId || !planName || !days) {
@@ -14,6 +16,11 @@ export const createWorkoutPlan = async (req: Request, res: Response): Promise<an
     const member = await Member.findById(memberId);
     if (!member) {
       return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    // Shift check
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
     }
 
     const workoutPlan = await WorkoutPlan.create({
@@ -42,7 +49,18 @@ export const createWorkoutPlan = async (req: Request, res: Response): Promise<an
 
 export const getMemberWorkoutPlans = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId } = req.params;
+
+    const member = await Member.findById(memberId);
+    if (!member) {
+      return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     const plans = await WorkoutPlan.find({ member: memberId })
       .populate('trainer', 'name')
       .sort({ createdAt: -1 });
@@ -55,12 +73,18 @@ export const getMemberWorkoutPlans = async (req: Request, res: Response): Promis
 
 export const getWorkoutPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const plan = await WorkoutPlan.findById(req.params.id)
-      .populate('member', 'name')
+      .populate('member', 'name shiftType')
       .populate('trainer', 'name');
       
     if (!plan) return res.status(404).json({ success: false, message: 'Workout plan not found' });
     
+    const member = plan.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     res.status(200).json({ success: true, data: plan });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -69,9 +93,16 @@ export const getWorkoutPlan = async (req: Request, res: Response): Promise<any> 
 
 export const updateWorkoutPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const existing = await WorkoutPlan.findById(req.params.id).populate('member');
+    if (!existing) return res.status(404).json({ success: false, message: 'Workout plan not found' });
+
+    const member = existing.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     const plan = await WorkoutPlan.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!plan) return res.status(404).json({ success: false, message: 'Workout plan not found' });
-    
     res.status(200).json({ success: true, data: plan });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -80,9 +111,17 @@ export const updateWorkoutPlan = async (req: Request, res: Response): Promise<an
 
 export const deleteWorkoutPlan = async (req: Request, res: Response): Promise<any> => {
   try {
-    const plan = await WorkoutPlan.findByIdAndDelete(req.params.id);
-    if (!plan) return res.status(404).json({ success: false, message: 'Workout plan not found' });
-    
+    const cashier: AuthCashier = (req as any).cashier;
+    const existing = await WorkoutPlan.findById(req.params.id).populate('member');
+    if (!existing) return res.status(404).json({ success: false, message: 'Workout plan not found' });
+
+    const member = existing.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
+    // Delete ONLY the workout plan document
+    await WorkoutPlan.findByIdAndDelete(req.params.id);
     res.status(200).json({ success: true, message: 'Workout plan deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -91,9 +130,16 @@ export const deleteWorkoutPlan = async (req: Request, res: Response): Promise<an
 
 export const completeWorkoutPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const existing = await WorkoutPlan.findById(req.params.id).populate('member');
+    if (!existing) return res.status(404).json({ success: false, message: 'Workout plan not found' });
+
+    const member = existing.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     const plan = await WorkoutPlan.findByIdAndUpdate(req.params.id, { status: 'COMPLETED' }, { new: true });
-    if (!plan) return res.status(404).json({ success: false, message: 'Workout plan not found' });
-    
     res.status(200).json({ success: true, data: plan });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });

@@ -15,28 +15,33 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
     const qrToken = req.body.qrToken || req.body.code || req.body.qrCode;
-    if (!qrToken) return res.status(400).json({ success: false, message: 'Missing QR token' });
+    if (!qrToken) return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
 
-    const token = qrToken.trim();
+    const token = String(qrToken).trim();
 
-    // 1. Find member by qrToken field (secure – no MongoDB ID exposed)
-    const member = await Member.findOne({ qrToken: token });
+    // 1. Find member by qrToken field or fallback to ObjectId
+    let member = await Member.findOne({ qrToken: token });
+    if (!member && mongoose.Types.ObjectId.isValid(token)) {
+      member = await Member.findById(token);
+    }
+
     if (!member) {
-      return res.status(404).json({ success: false, message: 'Member not found' });
+      return res.status(404).json({ success: false, message: 'العضو غير موجود' });
     }
 
     // SHIFT CHECK — core security: cashier cannot scan members from other shift
     if (!canAccessShift(cashier, member.shiftType)) {
-      return res.status(403).json({ success: false, message: 'This member does not belong to your shift' });
+      return res.status(403).json({ success: false, message: 'هذا العضو لا ينتمي لشفتك' });
+    }
+
+    // Check if Member is active
+    if (!member.active) {
+      return res.status(403).json({ success: false, message: 'حساب العضو غير نشط' });
     }
 
     // Check if QR is active
     if (member.isQrActive === false) {
-      return res.status(403).json({ success: false, message: 'QR Code is inactive' });
-    }
-
-    if (!member.active) {
-      return res.status(403).json({ success: false, message: 'Member account is inactive' });
+      return res.status(403).json({ success: false, message: 'كود الـ QR معطل لهذا العضو' });
     }
 
     // Timezone suitable for Egypt
@@ -57,21 +62,19 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    // Verify that membership exists and is active/not expired
-    const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
+    // Verify active subscription (independent of any workout/diet plans)
+    const activeSub = await Subscription.findOne({
+      member: member._id,
+      status: 'active',
+      endDate: { $gte: now },
+    }).sort({ endDate: -1 });
 
-    if (!lastSub) {
-      return res.status(422).json({
-        success: false,
-        message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
-      });
-    }
-
-    if (lastSub.status === 'expired' || new Date(lastSub.endDate) < now) {
-      if (lastSub.status !== 'expired') {
-        lastSub.status = 'expired';
-        await lastSub.save();
-      }
+    if (!activeSub) {
+      // Mark any outdated active subs as expired
+      await Subscription.updateMany(
+        { member: member._id, status: 'active', endDate: { $lt: now } },
+        { status: 'expired' }
+      );
       return res.status(422).json({
         success: false,
         message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
@@ -79,14 +82,14 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     }
 
     // Session-based: check remaining sessions BEFORE recording attendance
-    if (lastSub.subscriptionType === 'sessions' && lastSub.sessionsLimit > 0) {
-      if (lastSub.sessionsUsed >= lastSub.sessionsLimit) {
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
         // Exhausted — mark expired
-        lastSub.status = 'expired';
-        await lastSub.save();
+        activeSub.status = 'expired';
+        await activeSub.save();
         return res.status(422).json({
           success: false,
-          message: `انتهت حصصك (${lastSub.sessionsLimit}/${lastSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
         });
       }
     }
@@ -100,7 +103,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: 'Member already checked in today',
+        message: 'تم تسجيل حضور هذا العضو بالفعل اليوم',
       });
     }
 
@@ -117,14 +120,14 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
 
     // Session-based: increment sessionsUsed after successful check-in
     let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number } = {};
-    if (lastSub.subscriptionType === 'sessions' && lastSub.sessionsLimit > 0) {
-      lastSub.sessionsUsed = (lastSub.sessionsUsed || 0) + 1;
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
       // If this was the last session, expire automatically
-      if (lastSub.sessionsUsed >= lastSub.sessionsLimit) {
-        lastSub.status = 'expired';
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        activeSub.status = 'expired';
       }
-      await lastSub.save();
-      sessionInfo = { sessionsUsed: lastSub.sessionsUsed, sessionsLimit: lastSub.sessionsLimit };
+      await activeSub.save();
+      sessionInfo = { sessionsUsed: activeSub.sessionsUsed, sessionsLimit: activeSub.sessionsLimit };
     }
 
     // Send WhatsApp Notification (Non-blocking)
@@ -135,7 +138,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
 
     return res.status(200).json({
       success: true,
-      message: 'Check-in successful',
+      message: 'تم تسجيل الحضور بنجاح',
       member: { id: member._id, name: member.name },
       attendance: { checkIn: attendanceRecord.checkInTime, date: attendanceRecord.date },
       ...(sessionInfo.sessionsLimit ? { sessionInfo } : {}),
@@ -158,12 +161,49 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
     const member = await Member.findById(memberId);
     if (!member) return res.status(404).json({ message: 'العضو مش موجود' });
 
+    if (!member.active) {
+      return res.status(403).json({ message: 'حساب العضو غير نشط' });
+    }
+
     // SHIFT CHECK
     if (!canAccessShift(cashier, member.shiftType)) {
       return res.status(403).json({ message: 'This member does not belong to your shift' });
     }
 
-    const today = todayString();
+    // Check frozen subscription
+    const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
+    if (frozenSub) {
+      return res.status(422).json({ message: 'الاشتراك مجمد حالياً.' });
+    }
+
+    // Check active subscription
+    const now = new Date();
+    const activeSub = await Subscription.findOne({
+      member: member._id,
+      status: 'active',
+      endDate: { $gte: now },
+    }).sort({ endDate: -1 });
+
+    if (!activeSub) {
+      return res.status(422).json({ message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.', requiresRenewal: true });
+    }
+
+    // Check session limits
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        activeSub.status = 'expired';
+        await activeSub.save();
+        return res.status(422).json({
+          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          requiresRenewal: true,
+        });
+      }
+    }
+
+    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
+    const cairoTime = new Date(cairoTimeStr);
+    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
+
     const existing = await Attendance.findOne({ member: memberId, date: today });
     if (existing) {
       return res.status(400).json({ message: '⚠️ هذا العضو مسجّل حضور بالفعل اليوم! لا يمكن تسجيل الحضور أكثر من مرة في اليوم الواحد.' });
@@ -171,13 +211,34 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
 
     const record = await Attendance.create({
       member:      memberId,
-      checkInTime: new Date(),
+      checkInTime: now,
       date:        today,
+      method:      'MANUAL',
       status:      'open',
       shiftType:   member.shiftType,
     });
 
-    res.status(201).json(record);
+    // Increment sessionsUsed if session-based
+    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number } = {};
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        activeSub.status = 'expired';
+      }
+      await activeSub.save();
+      sessionInfo = { sessionsUsed: activeSub.sessionsUsed, sessionsLimit: activeSub.sessionsLimit };
+    }
+
+    // Send WhatsApp notification if available
+    if (member.phone) {
+      const timeStr = cairoTime.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+      sendWhatsApp(member.phone, templates.checkInSuccess(member.name, timeStr)).catch(e => console.error('[WhatsApp] checkin notification error:', e));
+    }
+
+    res.status(201).json({
+      ...record.toObject(),
+      ...(sessionInfo.sessionsLimit ? { sessionInfo } : {}),
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -332,16 +393,15 @@ export const getAttendanceStats = async (req: Request, res: Response): Promise<a
   }
 };
 
-// ─── Check-In by QR Code (Specific API from prompt requirements) ───────────────────
 export const checkInByQR = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const { qrCode } = req.body;
+    const qrCode = req.body.qrCode || req.body.qrToken || req.body.code;
     if (!qrCode) {
       return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
     }
 
-    const token = qrCode.trim();
+    const token = String(qrCode).trim();
 
     let member = await Member.findOne({ qrToken: token });
     if (!member && mongoose.Types.ObjectId.isValid(token)) {
@@ -349,50 +409,85 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
     }
 
     if (!member) {
-      return res.status(404).json({ success: false, message: '❌ Invalid QR Code' });
+      return res.status(404).json({ success: false, message: 'العضو غير موجود' });
     }
     if (!member.active) {
-      return res.status(400).json({ success: false, message: '❌ Member is Inactive' });
+      return res.status(403).json({ success: false, message: 'حساب العضو غير نشط' });
+    }
+    if (member.isQrActive === false) {
+      return res.status(403).json({ success: false, message: 'كود الـ QR معطل لهذا العضو' });
     }
 
     // SHIFT CHECK
     if (!canAccessShift(cashier, member.shiftType)) {
-      return res.status(403).json({ success: false, message: 'This member does not belong to your shift' });
+      return res.status(403).json({ success: false, message: 'هذا العضو لا ينتمي لشفتك' });
     }
 
     const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
     if (frozenSub) {
-      return res.status(400).json({ success: false, message: `❌ Membership Frozen (${member.name})` });
+      return res.status(422).json({ success: false, message: 'الاشتراك مجمد حالياً.' });
     }
 
+    const now = new Date();
     const activeSub = await Subscription.findOne({
-      member: member._id, status: 'active', endDate: { $gte: new Date() },
-    });
+      member: member._id, status: 'active', endDate: { $gte: now },
+    }).sort({ endDate: -1 });
 
     if (!activeSub) {
-      return res.status(400).json({ success: false, message: '❌ Membership Expired', requiresRenewal: true });
+      return res.status(422).json({ success: false, message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.', requiresRenewal: true });
     }
 
-    const today = todayString();
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        activeSub.status = 'expired';
+        await activeSub.save();
+        return res.status(422).json({
+          success: false,
+          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          requiresRenewal: true
+        });
+      }
+    }
+
+    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
+    const cairoTime = new Date(cairoTimeStr);
+    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
+
     const existing = await Attendance.findOne({ member: member._id, date: today });
 
     if (existing) {
-      return res.status(400).json({
-        success: false, message: '⚠️ Already Checked In Today',
-        member: member.name, checkInTime: existing.checkInTime,
+      return res.status(409).json({
+        success: false,
+        message: 'تم تسجيل حضور هذا العضو بالفعل اليوم',
+        member: member.name,
+        checkInTime: existing.checkInTime,
       });
     }
 
     const record = await Attendance.create({
       member:      member._id,
-      checkInTime: new Date(),
+      checkInTime: now,
       date:        today,
       qrToken:     token,
-      status:      'open',
+      method:      'QR',
+      status:      'CHECKED_IN',
       shiftType:   member.shiftType,
     });
 
-    return res.status(201).json({ success: true, member: member.name, checkInTime: record.checkInTime });
+    if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
+      activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
+      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        activeSub.status = 'expired';
+      }
+      await activeSub.save();
+    }
+
+    if (member.phone) {
+      const timeStr = cairoTime.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit', hour12: true });
+      sendWhatsApp(member.phone, templates.checkInSuccess(member.name, timeStr)).catch(e => console.error('[WhatsApp] checkin notification error:', e));
+    }
+
+    return res.status(201).json({ success: true, message: 'تم تسجيل الحضور بنجاح', member: member.name, checkInTime: record.checkInTime });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }

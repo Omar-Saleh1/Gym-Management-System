@@ -19,6 +19,17 @@ export interface IMember extends Document {
   updatedAt: Date;
 }
 
+const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+export function generateShortToken(length = 12): string {
+  const bytes = crypto.randomBytes(length);
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += BASE62_CHARS[bytes[i] % 62];
+  }
+  return result;
+}
+
 const memberSchema = new Schema<IMember>(
   {
     name:        { type: String, required: true },
@@ -32,7 +43,7 @@ const memberSchema = new Schema<IMember>(
     active:      { type: Boolean, default: true },
     shiftType:   { type: String, enum: ['GIRLS', 'BOYS', 'unassigned'], default: 'unassigned' },
     isQrActive:  { type: Boolean, default: true },
-    qrToken:     { type: String, unique: true, default: () => crypto.randomBytes(24).toString('hex') },
+    qrToken:     { type: String, unique: true, default: () => generateShortToken(12) },
   },
   { timestamps: true }
 );

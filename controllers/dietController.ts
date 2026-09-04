@@ -2,9 +2,11 @@ import { Request, Response } from 'express';
 import DietPlan from '../models/DietPlan';
 import Member from '../models/Member';
 import { sendNotification } from '../services/notification.service';
+import { canAccessShift, AuthCashier } from '../middleware/auth';
 
 export const createDietPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId, planName, goal, calories, protein, carbs, fats, startDate, endDate, meals, notes } = req.body;
 
     if (!memberId || !planName) {
@@ -14,6 +16,10 @@ export const createDietPlan = async (req: Request, res: Response): Promise<any> 
     const member = await Member.findById(memberId);
     if (!member) {
       return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
     }
 
     const dietPlan = await DietPlan.create({
@@ -45,7 +51,18 @@ export const createDietPlan = async (req: Request, res: Response): Promise<any> 
 
 export const getMemberDietPlans = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const { memberId } = req.params;
+
+    const member = await Member.findById(memberId);
+    if (!member) {
+      return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    if (!canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
     const plans = await DietPlan.find({ member: memberId })
       .populate('trainer', 'name')
       .sort({ createdAt: -1 });
@@ -58,11 +75,17 @@ export const getMemberDietPlans = async (req: Request, res: Response): Promise<a
 
 export const getDietPlan = async (req: Request, res: Response): Promise<any> => {
   try {
+    const cashier: AuthCashier = (req as any).cashier;
     const plan = await DietPlan.findById(req.params.id)
-      .populate('member', 'name')
+      .populate('member', 'name shiftType')
       .populate('trainer', 'name');
 
     if (!plan) return res.status(404).json({ success: false, message: 'Diet plan not found' });
+
+    const member = plan.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
 
     res.status(200).json({ success: true, data: plan });
   } catch (err: any) {
@@ -72,9 +95,16 @@ export const getDietPlan = async (req: Request, res: Response): Promise<any> => 
 
 export const updateDietPlan = async (req: Request, res: Response): Promise<any> => {
   try {
-    const plan = await DietPlan.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!plan) return res.status(404).json({ success: false, message: 'Diet plan not found' });
+    const cashier: AuthCashier = (req as any).cashier;
+    const existing = await DietPlan.findById(req.params.id).populate('member');
+    if (!existing) return res.status(404).json({ success: false, message: 'Diet plan not found' });
 
+    const member = existing.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
+    const plan = await DietPlan.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.status(200).json({ success: true, data: plan });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
@@ -83,9 +113,17 @@ export const updateDietPlan = async (req: Request, res: Response): Promise<any> 
 
 export const deleteDietPlan = async (req: Request, res: Response): Promise<any> => {
   try {
-    const plan = await DietPlan.findByIdAndDelete(req.params.id);
-    if (!plan) return res.status(404).json({ success: false, message: 'Diet plan not found' });
+    const cashier: AuthCashier = (req as any).cashier;
+    const existing = await DietPlan.findById(req.params.id).populate('member');
+    if (!existing) return res.status(404).json({ success: false, message: 'Diet plan not found' });
 
+    const member = existing.member as any;
+    if (member && member.shiftType && !canAccessShift(cashier, member.shiftType)) {
+      return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
+    }
+
+    // Delete ONLY the diet plan document
+    await DietPlan.findByIdAndDelete(req.params.id);
     res.status(200).json({ success: true, message: 'Diet plan deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });

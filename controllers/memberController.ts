@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
-import Member from '../models/Member';
+import Member, { generateShortToken } from '../models/Member';
 import Subscription from '../models/Subscription';
 import Attendance from '../models/Attendance';
 import Payment from '../models/Payment';
@@ -189,6 +189,13 @@ export const deleteMember = async (req: Request, res: Response): Promise<any> =>
     const member = await assertShiftAccess(cashier, req.params.id, res);
     if (!member) return;
 
+    // Check if member has active subscriptions before deactivating
+    const now = new Date();
+    const activeSub = await Subscription.findOne({ member: member._id, status: 'active', endDate: { $gte: now } });
+    if (activeSub) {
+      return res.status(400).json({ message: 'لا يمكن حذف عضو لديه اشتراك ساري ونشط. يرجى إلغاء أو إنهاء الاشتراك أولاً.' });
+    }
+
     await Member.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
     res.json({ message: 'تم تعطيل العضو بنجاح' });
   } catch (err: any) {
@@ -200,33 +207,66 @@ export const deleteMember = async (req: Request, res: Response): Promise<any> =>
 export const getPublicMemberByToken = async (req: Request, res: Response): Promise<any> => {
   try {
     const { token } = req.params;
-    let member: any = await Member.findOne({ qrToken: token, active: true }).select('name qrToken');
-    if (!member && mongoose.Types.ObjectId.isValid(token as string)) {
-      member = await Member.findById(token as string).select('name qrToken');
+    const tokenStr = String(token).trim();
+
+    let member: any = await Member.findOne({ qrToken: tokenStr });
+    if (!member && mongoose.Types.ObjectId.isValid(tokenStr)) {
+      member = await Member.findById(tokenStr);
     }
 
     if (!member) {
-      return res.status(404).json({ message: 'العضو غير موجود أو غير نشط' });
+      return res.status(404).json({ success: false, message: 'العضو غير موجود' });
     }
+
+    if (!member.active) {
+      return res.status(403).json({ success: false, message: 'حساب العضو غير نشط' });
+    }
+
+    if (member.isQrActive === false) {
+      return res.status(403).json({ success: false, message: 'كود الـ QR معطل لهذا العضو' });
+    }
+
+    const now = new Date();
+    // Check frozen first
+    const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
+    // Check active
+    const activeSub = await Subscription.findOne({
+      member: member._id,
+      status: 'active',
+      endDate: { $gte: now },
+    }).sort({ endDate: -1 });
 
     const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
 
     let membershipStatus = 'Expired';
     let endDate = null;
 
-    if (lastSub) {
-      endDate = lastSub.endDate;
-      const now = new Date();
-      if (lastSub.status === 'active' && lastSub.endDate >= now) {
+    if (frozenSub) {
+      membershipStatus = 'Frozen';
+      endDate = frozenSub.freezeEndDate || frozenSub.endDate;
+    } else if (activeSub) {
+      if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0 && activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+        membershipStatus = 'Expired';
+      } else {
         membershipStatus = 'Active';
-      } else if (lastSub.status === 'frozen') {
-        membershipStatus = 'Frozen';
       }
+      endDate = activeSub.endDate;
+    } else if (lastSub) {
+      membershipStatus = 'Expired';
+      endDate = lastSub.endDate;
     }
 
-    res.json({ name: member.name, qrToken: member.qrToken, membershipStatus, endDate });
+    res.json({
+      success: true,
+      name: member.name,
+      qrToken: member.qrToken,
+      membershipStatus,
+      endDate,
+      isQrActive: member.isQrActive !== false,
+      active: member.active,
+    });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -255,7 +295,7 @@ export const regenerateMemberQr = async (req: Request, res: Response): Promise<a
     const member = await assertShiftAccess(cashier, req.params.id, res);
     if (!member) return;
 
-    member.qrToken = crypto.randomBytes(24).toString('hex');
+    member.qrToken = generateShortToken(12);
     await member.save();
 
     const qrDataUrl = await QRCode.toDataURL(member.qrToken);
