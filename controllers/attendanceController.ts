@@ -5,8 +5,9 @@ import Member from '../models/Member';
 import Subscription from '../models/Subscription';
 import { sendWhatsApp, templates } from '../services/whatsapp.service';
 import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
+import { getBusinessDateString, getCairoNow, getBusinessDayBounds, getBusinessMonthBounds } from '../utils/businessDay';
 
-const todayString = () => new Date().toISOString().split('T')[0];
+const todayString = () => getBusinessDateString();
 
 
 // ─── QR Scan (smart: checkin → checkout toggle) ───────────────────────────────
@@ -44,11 +45,10 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       return res.status(403).json({ success: false, message: 'كود الـ QR معطل لهذا العضو' });
     }
 
-    // Timezone suitable for Egypt
+    // Timezone & business day (rolls over at 04:00 AM)
     const now = new Date();
-    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const cairoTime = new Date(cairoTimeStr);
-    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
+    const cairoTime = getCairoNow();
+    const today = getBusinessDateString();
 
     // Check for frozen subscription
     const frozenSub = await Subscription.findOne({
@@ -212,9 +212,8 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
       }
     }
 
-    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const cairoTime = new Date(cairoTimeStr);
-    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
+    const cairoTime = getCairoNow();
+    const today = getBusinessDateString();
 
     const existing = await Attendance.findOne({ member: memberId, date: today });
     if (existing) {
@@ -397,23 +396,20 @@ export const getTodayAttendance = async (req: Request, res: Response): Promise<a
 export const getAttendanceStats = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const today = todayString();
+    const today = getBusinessDateString();
     const shiftFilter = getShiftFilter(cashier);
 
-    const now = new Date();
-    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const cairoDate = new Date(cairoTimeStr);
+    const dayBounds = getBusinessDayBounds();
+    const monthBounds = getBusinessMonthBounds();
 
-    const startOfMonthDate = new Date(cairoDate.getFullYear(), cairoDate.getMonth(), 1);
-    const startOfMonth = startOfMonthDate.getFullYear() + '-' + String(startOfMonthDate.getMonth() + 1).padStart(2, '0') + '-01';
-
+    const cairoDate = getCairoNow();
     const startOfWeekDate = new Date(cairoDate);
     startOfWeekDate.setDate(cairoDate.getDate() - cairoDate.getDay());
-    const startOfWeek = startOfWeekDate.getFullYear() + '-' + String(startOfWeekDate.getMonth() + 1).padStart(2, '0') + '-' + String(startOfWeekDate.getDate()).padStart(2, '0');
+    const startOfWeekStr = getBusinessDateString(startOfWeekDate);
 
     const todayCount = await Attendance.countDocuments({ date: today, ...shiftFilter });
-    const monthCount = await Attendance.countDocuments({ date: { $gte: startOfMonth }, ...shiftFilter });
-    const weekCount  = await Attendance.countDocuments({ date: { $gte: startOfWeek }, ...shiftFilter });
+    const monthCount = await Attendance.countDocuments({ checkInTime: { $gte: monthBounds.startUtc, $lte: monthBounds.endUtc }, ...shiftFilter });
+    const weekCount  = await Attendance.countDocuments({ date: { $gte: startOfWeekStr }, ...shiftFilter });
 
     const daysElapsed = cairoDate.getDate() || 1;
     const averageDaily = Math.round(monthCount / daysElapsed);
@@ -488,9 +484,8 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
       }
     }
 
-    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const cairoTime = new Date(cairoTimeStr);
-    const today = cairoTime.getFullYear() + '-' + String(cairoTime.getMonth() + 1).padStart(2, '0') + '-' + String(cairoTime.getDate()).padStart(2, '0');
+    const cairoTime = getCairoNow();
+    const today = getBusinessDateString();
 
     const existing = await Attendance.findOne({ member: member._id, date: today });
 

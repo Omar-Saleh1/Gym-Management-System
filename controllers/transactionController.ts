@@ -3,48 +3,38 @@ import Transaction from '../models/Transaction';
 import Member from '../models/Member';
 import mongoose from 'mongoose';
 import { getShiftFilter, AuthCashier } from '../middleware/auth';
+import { getBusinessDayBounds, getBusinessMonthBounds, getBusinessDateString, getCairoNow } from '../utils/businessDay';
 
-// Cairo Date Helper to build UTC range bounds
+// Cairo Date Helper to build UTC range bounds (with 04:00 AM business day cutoff)
 const getCairoUtcRange = (range: string, from?: string, to?: string) => {
-  const now = new Date();
-  const cairoStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-  const cairoDate = new Date(cairoStr);
-  
-  const startOfTodayCairo = new Date(cairoDate.getFullYear(), cairoDate.getMonth(), cairoDate.getDate());
-  
-  let startDateCairo = new Date(startOfTodayCairo);
-  let endDateCairo = new Date(startOfTodayCairo);
-  endDateCairo.setHours(23, 59, 59, 999);
-  
-  if (range === 'yesterday') {
-    startDateCairo.setDate(startDateCairo.getDate() - 1);
-    endDateCairo.setDate(endDateCairo.getDate() - 1);
-  } else if (range === 'week') {
-    startDateCairo.setDate(startDateCairo.getDate() - startDateCairo.getDay());
+  if (range === 'today') {
+    const { startUtc, endUtc } = getBusinessDayBounds();
+    return { start: startUtc, end: endUtc };
+  } else if (range === 'yesterday') {
+    const cairoDate = getCairoNow();
+    cairoDate.setDate(cairoDate.getDate() - (cairoDate.getHours() < 4 ? 2 : 1));
+    const yesterdayStr = `${cairoDate.getFullYear()}-${String(cairoDate.getMonth() + 1).padStart(2, '0')}-${String(cairoDate.getDate()).padStart(2, '0')}`;
+    const { startUtc, endUtc } = getBusinessDayBounds(yesterdayStr);
+    return { start: startUtc, end: endUtc };
   } else if (range === 'month') {
-    startDateCairo = new Date(startDateCairo.getFullYear(), startDateCairo.getMonth(), 1);
-  } else if (range === 'custom') {
-    if (from) {
-      startDateCairo = new Date(from);
-      startDateCairo.setHours(0, 0, 0, 0);
-    }
-    if (to) {
-      endDateCairo = new Date(to);
-      endDateCairo.setHours(23, 59, 59, 999);
-    }
+    const { startUtc, endUtc } = getBusinessMonthBounds();
+    return { start: startUtc, end: endUtc };
+  } else if (range === 'week') {
+    const cairoDate = getCairoNow();
+    const startOfWeek = new Date(cairoDate);
+    startOfWeek.setDate(cairoDate.getDate() - cairoDate.getDay());
+    const weekStartStr = getBusinessDateString(startOfWeek);
+    const { startUtc } = getBusinessDayBounds(weekStartStr);
+    const { endUtc } = getBusinessDayBounds();
+    return { start: startUtc, end: endUtc };
+  } else if (range === 'custom' || from || to) {
+    const fromBounds = from ? getBusinessDayBounds(from) : getBusinessDayBounds();
+    const toBounds = to ? getBusinessDayBounds(to) : getBusinessDayBounds();
+    return { start: fromBounds.startUtc, end: toBounds.endUtc };
   }
 
-  const getUtcDate = (localDate: Date) => {
-    const localTime = localDate.getTime();
-    const temp = new Date(localDate.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
-    const diff = temp.getTime() - localDate.getTime();
-    return new Date(localTime - diff);
-  };
-  
-  return {
-    start: getUtcDate(startDateCairo),
-    end: getUtcDate(endDateCairo)
-  };
+  const { startUtc, endUtc } = getBusinessDayBounds();
+  return { start: startUtc, end: endUtc };
 };
 
 export const getTransactions = async (req: Request, res: Response): Promise<any> => {

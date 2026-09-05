@@ -2,32 +2,9 @@ import { Request, Response } from 'express';
 import SingleVisit from '../models/SingleVisit';
 import Transaction from '../models/Transaction';
 import { AuthCashier, canAccessShift, getShiftFilter } from '../middleware/auth';
+import { getBusinessDayBounds, getBusinessDateString } from '../utils/businessDay';
 
-// Helper to compute Cairo UTC start and end bounds
-const getCairoDayBounds = (dateStr?: string) => {
-  let targetCairo: Date;
-  if (dateStr && dateStr !== 'today') {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    targetCairo = new Date(y, m - 1, d, 0, 0, 0, 0);
-  } else {
-    const nowCairoStr = new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const nowCairo = new Date(nowCairoStr);
-    targetCairo = new Date(nowCairo.getFullYear(), nowCairo.getMonth(), nowCairo.getDate(), 0, 0, 0, 0);
-  }
-
-  const dayEndCairo = new Date(targetCairo);
-  dayEndCairo.setHours(23, 59, 59, 999);
-
-  const toUtc = (d: Date) => {
-    const temp = new Date(d.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
-    return new Date(d.getTime() - (temp.getTime() - d.getTime()));
-  };
-
-  return {
-    startUtc: toUtc(targetCairo),
-    endUtc: toUtc(dayEndCairo),
-  };
-};
+const getCairoDayBounds = (dateStr?: string) => getBusinessDayBounds(dateStr);
 
 export const createSingleVisit = async (req: Request, res: Response): Promise<any> => {
   try {

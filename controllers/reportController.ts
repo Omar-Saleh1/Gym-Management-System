@@ -9,6 +9,7 @@ import Transaction from '../models/Transaction';
 import Payment from '../models/Payment';
 import SingleVisit from '../models/SingleVisit';
 import { getShiftFilter, AuthCashier } from '../middleware/auth';
+import { getBusinessDayBounds, getBusinessDateString, toCairoUtc } from '../utils/businessDay';
 
 
 const buildDateRange = (from?: string, to?: string) => {
@@ -25,10 +26,7 @@ const buildDateRange = (from?: string, to?: string) => {
 export const getDashboard = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { startUtc, endUtc } = getBusinessDayBounds();
 
     const soon = new Date();
     soon.setDate(soon.getDate() + 7);
@@ -44,7 +42,7 @@ export const getDashboard = async (req: Request, res: Response): Promise<any> =>
 
     const [todaySales, totalMembers, activeSubscriptions, expiringSoon, todayAttendance, todaySingleVisits] =
       await Promise.all([
-        Sale.find({ createdAt: { $gte: today, $lt: tomorrow }, ...(cashier?.id ? { cashier: cashier.id } : {}) }),
+        Sale.find({ createdAt: { $gte: startUtc, $lte: endUtc }, ...(cashier?.id ? { cashier: cashier.id } : {}) }),
         Member.countDocuments({ active: true, ...shiftFilter }),
         Subscription.countDocuments({ status: 'active', endDate: { $gte: new Date() }, ...memberFilter }),
         Subscription.countDocuments({
@@ -52,8 +50,8 @@ export const getDashboard = async (req: Request, res: Response): Promise<any> =>
           endDate: { $gte: new Date(), $lte: soon },
           ...memberFilter,
         }),
-        Attendance.countDocuments({ checkInTime: { $gte: today, $lt: tomorrow }, ...shiftFilter }),
-        SingleVisit.find({ visitedAt: { $gte: today, $lt: tomorrow }, ...visitShiftFilter }),
+        Attendance.countDocuments({ checkInTime: { $gte: startUtc, $lte: endUtc }, ...shiftFilter }),
+        SingleVisit.find({ visitedAt: { $gte: startUtc, $lte: endUtc }, ...visitShiftFilter }),
       ]);
 
     const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
@@ -483,31 +481,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       : (cashier?.shiftType || null);
 
     const dateParam = req.query.date as string;
-
-    // Parse target date in Cairo time
-    let targetDateCairo: Date;
-    if (dateParam) {
-      const [y, m, d] = dateParam.split('-').map(Number);
-      targetDateCairo = new Date(y, m - 1, d, 0, 0, 0, 0);
-    } else {
-      const nowCairoStr = new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-      const nowCairo    = new Date(nowCairoStr);
-      targetDateCairo   = new Date(nowCairo.getFullYear(), nowCairo.getMonth(), nowCairo.getDate(), 0, 0, 0, 0);
-    }
-
-    const dayEndCairo = new Date(targetDateCairo);
-    dayEndCairo.setHours(23, 59, 59, 999);
-
-    // Convert Cairo local → UTC stored in MongoDB
-    const toUtc = (d: Date) => {
-      const temp = new Date(d.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
-      return new Date(d.getTime() - (temp.getTime() - d.getTime()));
-    };
-
-    const startUtc = toUtc(targetDateCairo);
-    const endUtc   = toUtc(dayEndCairo);
-
-    const dateStr = `${targetDateCairo.getFullYear()}-${String(targetDateCairo.getMonth() + 1).padStart(2, '0')}-${String(targetDateCairo.getDate()).padStart(2, '0')}`;
+    const { startUtc, endUtc, dateStr } = getBusinessDayBounds(dateParam);
 
     const cashierId = req.query.cashierId as string;
 

@@ -6,6 +6,7 @@ import Expense from '../models/Expense';
 import Transaction from '../models/Transaction';
 import mongoose from 'mongoose';
 import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
+import { getBusinessDayBounds, getBusinessMonthBounds, getCairoNow } from '../utils/businessDay';
 
 // ─── Create Payment ──────────────────────────────────────────────────────────
 export const createPayment = async (req: Request, res: Response): Promise<any> => {
@@ -132,25 +133,17 @@ export const payRemaining = async (req: Request, res: Response): Promise<any> =>
 export const getRevenueDashboard = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const now = new Date();
-    const cairoTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Cairo' });
-    const cairoDate = new Date(cairoTimeStr);
+    const dayBounds = getBusinessDayBounds();
+    const monthBounds = getBusinessMonthBounds();
 
-    const startOfToday = new Date(cairoDate.getFullYear(), cairoDate.getMonth(), cairoDate.getDate());
-    const startOfWeek = new Date(startOfToday);
-    startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
-    const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
+    const cairoDate = getCairoNow();
+    const startOfWeek = new Date(cairoDate);
+    startOfWeek.setDate(cairoDate.getDate() - cairoDate.getDay());
+    const weekBounds = getBusinessDayBounds(`${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, '0')}-${String(startOfWeek.getDate()).padStart(2, '0')}`);
 
-    const getCairoUtcDate = (localDate: Date) => {
-      const localTime = localDate.getTime();
-      const temp = new Date(localDate.toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
-      const diff = temp.getTime() - localDate.getTime();
-      return new Date(localTime - diff);
-    };
-
-    const startOfTodayUtc = getCairoUtcDate(startOfToday);
-    const startOfWeekUtc  = getCairoUtcDate(startOfWeek);
-    const startOfMonthUtc = getCairoUtcDate(startOfMonth);
+    const startOfTodayUtc = dayBounds.startUtc;
+    const startOfWeekUtc  = weekBounds.startUtc;
+    const startOfMonthUtc = monthBounds.startUtc;
 
     // Shift filter for transactions (by createdBy cashier's shift, based on JWT)
     // We filter transactions by cashier's shiftType using member's shiftType via a lookup,
