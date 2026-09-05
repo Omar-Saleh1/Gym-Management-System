@@ -17,6 +17,8 @@ export interface ISale extends Document {
   notes?: string;
   member?: mongoose.Types.ObjectId | IMember;
   cashier: mongoose.Types.ObjectId | ICashier;
+  transactionId?: mongoose.Types.ObjectId;
+  shiftType?: 'GIRLS' | 'BOYS';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +41,8 @@ const saleSchema = new Schema<ISale>(
     notes: { type: String, default: '' },
     member: { type: Schema.Types.ObjectId, ref: 'Member' },
     cashier: { type: Schema.Types.ObjectId, ref: 'Cashier', required: true },
+    transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' },
+    shiftType: { type: String, enum: ['GIRLS', 'BOYS'] },
   },
   { timestamps: true }
 );

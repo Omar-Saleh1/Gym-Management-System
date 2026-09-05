@@ -11,6 +11,7 @@ export interface ITransaction extends Document {
   date: Date;
   memberId?: mongoose.Types.ObjectId | IMember;
   singleVisitId?: mongoose.Types.ObjectId;
+  saleId?: mongoose.Types.ObjectId;
   customerName?: string;
   shiftType?: 'GIRLS' | 'BOYS';
   subscriptionId?: mongoose.Types.ObjectId | ISubscription;
@@ -33,6 +34,7 @@ const transactionSchema = new Schema<ITransaction>(
     date: { type: Date, default: Date.now },
     memberId: { type: Schema.Types.ObjectId, ref: 'Member' },
     singleVisitId: { type: Schema.Types.ObjectId, ref: 'SingleVisit' },
+    saleId: { type: Schema.Types.ObjectId, ref: 'Sale' },
     customerName: { type: String },
     shiftType: { type: String, enum: ['GIRLS', 'BOYS'] },
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription' },

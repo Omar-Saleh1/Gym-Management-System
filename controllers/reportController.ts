@@ -310,6 +310,7 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       attendanceMatch.shiftType = activeShift;
       memberMatch.shiftType = activeShift;
       singleVisitMatch.shiftType = activeShift;
+      saleMatch.shiftType = activeShift;
     }
 
     if (cashierId) {
@@ -350,21 +351,34 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       // Coach salaries for this month
       CoachSalary.find({ month: monthStr }).populate('coach', 'name'),
       // Cashier sales this month
-      Sale.find(saleMatch),
+      Sale.find(saleMatch)
+        .populate('cashier', 'name username role shiftType')
+        .populate('member', 'name phone')
+        .populate('items.product', 'name category price')
+        .sort({ createdAt: -1 }),
       // Single visits this month
       SingleVisit.find(singleVisitMatch).populate('createdBy', 'name'),
     ]);
 
     // ── Financial Summary ─────────────────────────────────────────────────────
-    const totalIncome  = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const salesRevenue = sales.reduce((s, sale) => s + sale.total, 0);
+    const storeTxTotal = transactions.filter((t: any) => t.type === 'income' && (t.category === 'store' || t.category === 'sales')).reduce((s: number, t: any) => s + t.amount, 0);
+    let totalIncome  = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-    const netProfit    = totalIncome - totalExpense;
 
     // ── Income breakdown by category ──────────────────────────────────────────
     const incomeByCategory: Record<string, number> = {};
     transactions.filter(t => t.type === 'income').forEach(t => {
       incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
     });
+
+    if (storeTxTotal < salesRevenue) {
+      const diff = salesRevenue - storeTxTotal;
+      totalIncome += diff;
+      incomeByCategory['store'] = (incomeByCategory['store'] || 0) + diff;
+    }
+
+    const netProfit = totalIncome - totalExpense;
 
     // ── Expense breakdown by category ─────────────────────────────────────────
     const expenseByCategory: Record<string, number> = {};
@@ -386,9 +400,17 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       const dayStartUtc = toUtc(dayStart);
       const dayEndUtc   = toUtc(dayEnd);
 
+      const daySales = sales
+        .filter(s => s.createdAt >= dayStartUtc && s.createdAt <= dayEndUtc)
+        .reduce((s, sale) => s + sale.total, 0);
+      const dayStoreTx = transactions
+        .filter(t => t.type === 'income' && (t.category === 'store' || t.category === 'sales') && t.date >= dayStartUtc && t.date <= dayEndUtc)
+        .reduce((s, t) => s + t.amount, 0);
+
       const dayInc = transactions
         .filter(t => t.type === 'income' && t.date >= dayStartUtc && t.date <= dayEndUtc)
-        .reduce((s, t) => s + t.amount, 0);
+        .reduce((s, t) => s + t.amount, 0) + Math.max(0, daySales - dayStoreTx);
+
       const dayExp = transactions
         .filter(t => t.type === 'expense' && t.date >= dayStartUtc && t.date <= dayEndUtc)
         .reduce((s, t) => s + t.amount, 0);
@@ -420,9 +442,6 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
       .sort((a, b) => b.total - a.total)
       .slice(0, 5);
 
-    // ── Sales (cashier) ───────────────────────────────────────────────────────
-    const salesRevenue = sales.reduce((s, sale) => s + sale.total, 0);
-
     // ── Coach Salaries ────────────────────────────────────────────────────────
     const totalSalariesDue  = coachSalaries.reduce((s, cs) => s + cs.salaryAmount, 0);
     const totalSalariesPaid = coachSalaries.reduce((s, cs) => s + cs.paidAmount, 0);
@@ -437,6 +456,11 @@ export const getMonthlyReport = async (req: Request, res: Response): Promise<any
         incomeByCategory,
         expenseByCategory,
         dailyChart: dailyIncome,
+        sales: {
+          count: sales.length,
+          revenue: salesRevenue,
+          list: sales,
+        },
         subscriptions: {
           count: subscriptions.length,
           revenue: subscriptionRevenue,
@@ -500,6 +524,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
         { createdAt: { $gte: startUtc, $lte: endUtc } },
       ],
     };
+    const saleMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
     const attendanceMatch: any = { checkInTime: { $gte: startUtc, $lte: endUtc } };
     const memberMatch: any = { createdAt: { $gte: startUtc, $lte: endUtc } };
     const singleVisitMatch: any = { visitedAt: { $gte: startUtc, $lte: endUtc } };
@@ -516,6 +541,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       attendanceMatch.shiftType = activeShift;
       memberMatch.shiftType = activeShift;
       singleVisitMatch.shiftType = activeShift;
+      saleMatch.shiftType = activeShift;
     }
 
     if (cashierId) {
@@ -523,6 +549,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       paymentMatch.createdBy = cashierId;
       subMatch.createdBy = cashierId;
       singleVisitMatch.createdBy = cashierId;
+      saleMatch.cashier = cashierId;
     }
 
     // ── Parallel queries ──────────────────────────────────────────────────────
@@ -533,6 +560,7 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       newMembers,
       settledPayments,
       singleVisits,
+      sales,
     ] = await Promise.all([
       // All transactions for this day
       Transaction.find(txMatch)
@@ -559,12 +587,19 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       SingleVisit.find(singleVisitMatch)
         .populate('createdBy', 'name')
         .sort({ visitedAt: -1 }),
+      // Cashier sales today
+      Sale.find(saleMatch)
+        .populate('cashier', 'name username role shiftType')
+        .populate('member', 'name phone')
+        .populate('items.product', 'name category price')
+        .sort({ createdAt: -1 }),
     ]);
 
     // ── Financials ────────────────────────────────────────────────────────────
-    const totalIncome  = transactions.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + t.amount, 0);
+    const salesRevenue = sales.reduce((sum, s) => sum + s.total, 0);
+    const storeTxTotal = transactions.filter((t: any) => t.type === 'income' && (t.category === 'store' || t.category === 'sales')).reduce((s: number, t: any) => s + t.amount, 0);
+    let totalIncome  = transactions.filter((t: any) => t.type === 'income').reduce((s: number, t: any) => s + t.amount, 0);
     const totalExpense = transactions.filter((t: any) => t.type === 'expense').reduce((s: number, t: any) => s + t.amount, 0);
-    const netProfit    = totalIncome - totalExpense;
 
     // Single visits revenue
     const singleVisitsRevenue = singleVisits.reduce((sum, v) => sum + (v.amount || 0), 0);
@@ -575,13 +610,21 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       incomeByCategory[t.category] = (incomeByCategory[t.category] || 0) + t.amount;
     });
 
+    if (storeTxTotal < salesRevenue) {
+      const diff = salesRevenue - storeTxTotal;
+      totalIncome += diff;
+      incomeByCategory['store'] = (incomeByCategory['store'] || 0) + diff;
+    }
+
+    const netProfit = totalIncome - totalExpense;
+
     // Expense breakdown
     const expenseByCategory: Record<string, number> = {};
     transactions.filter((t: any) => t.type === 'expense').forEach((t: any) => {
       expenseByCategory[t.category] = (expenseByCategory[t.category] || 0) + t.amount;
     });
 
-    // ── Attendance ────────────────────────────────────────────────────────────
+    // ── Attendance ────────────────────────────────────────────────────
     const uniqueVisitors = new Set(attendanceRecords.map((r: any) => String(r.member?._id))).size;
 
     // ── Payments settled today ────────────────────────────────────────────────
@@ -592,10 +635,15 @@ export const getDailyReport = async (req: Request, res: Response): Promise<any> 
       data: {
         date: dateStr,
         shiftType: activeShift,
-        financial: { totalIncome, totalExpense, netProfit, singleVisitsRevenue },
+        financial: { totalIncome, totalExpense, netProfit, singleVisitsRevenue, salesRevenue },
         incomeByCategory,
         expenseByCategory,
         transactions,
+        sales: {
+          count: sales.length,
+          revenue: salesRevenue,
+          list: sales,
+        },
         subscriptions: {
           count: subscriptions.length,
           list: subscriptions,
