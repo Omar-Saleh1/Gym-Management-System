@@ -233,24 +233,36 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      endDate: { $gte: now },
+      $or: [
+        { endDate: { $gte: now } },
+        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
+      ]
     }).sort({ endDate: -1 });
 
     const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
 
     let membershipStatus = 'Expired';
     let endDate = null;
+    let sessionInfo = null;
 
     if (frozenSub) {
       membershipStatus = 'Frozen';
       endDate = frozenSub.freezeEndDate || frozenSub.endDate;
     } else if (activeSub) {
-      if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0 && activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+      if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0 && (activeSub.sessionsUsed || 0) >= activeSub.sessionsLimit) {
         membershipStatus = 'Expired';
       } else {
         membershipStatus = 'Active';
       }
       endDate = activeSub.endDate;
+
+      if (activeSub.subscriptionType === 'sessions') {
+        sessionInfo = {
+          sessionsLimit: activeSub.sessionsLimit,
+          sessionsUsed: activeSub.sessionsUsed || 0,
+          sessionsRemaining: Math.max(0, activeSub.sessionsLimit - (activeSub.sessionsUsed || 0)),
+        };
+      }
     } else if (lastSub) {
       membershipStatus = 'Expired';
       endDate = lastSub.endDate;
@@ -262,6 +274,7 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
       qrToken: member.qrToken,
       membershipStatus,
       endDate,
+      sessionInfo,
       isQrActive: member.isQrActive !== false,
       active: member.active,
     });

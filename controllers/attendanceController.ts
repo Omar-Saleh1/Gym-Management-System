@@ -66,18 +66,22 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      endDate: { $gte: now },
+      $or: [
+        { endDate: { $gte: now } },
+        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
+      ]
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
       // Mark any outdated active subs as expired
       await Subscription.updateMany(
-        { member: member._id, status: 'active', endDate: { $lt: now } },
+        { member: member._id, status: 'active', endDate: { $lt: now }, subscriptionType: { $ne: 'sessions' } },
         { status: 'expired' }
       );
       return res.status(422).json({
         success: false,
         message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
+        requiresRenewal: true,
       });
     }
 
@@ -90,6 +94,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
         return res.status(422).json({
           success: false,
           message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          requiresRenewal: true,
         });
       }
     }
@@ -119,7 +124,7 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     });
 
     // Session-based: increment sessionsUsed after successful check-in
-    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number } = {};
+    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number; sessionsRemaining?: number } = {};
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
       activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
       // If this was the last session, expire automatically
@@ -127,7 +132,11 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
         activeSub.status = 'expired';
       }
       await activeSub.save();
-      sessionInfo = { sessionsUsed: activeSub.sessionsUsed, sessionsLimit: activeSub.sessionsLimit };
+      sessionInfo = {
+        sessionsUsed: activeSub.sessionsUsed,
+        sessionsLimit: activeSub.sessionsLimit,
+        sessionsRemaining: Math.max(0, activeSub.sessionsLimit - activeSub.sessionsUsed),
+      };
     }
 
     // Send WhatsApp Notification (Non-blocking)
@@ -181,7 +190,10 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      endDate: { $gte: now },
+      $or: [
+        { endDate: { $gte: now } },
+        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
+      ]
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
@@ -219,14 +231,18 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
     });
 
     // Increment sessionsUsed if session-based
-    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number } = {};
+    let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number; sessionsRemaining?: number } = {};
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
       activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
       if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
       }
       await activeSub.save();
-      sessionInfo = { sessionsUsed: activeSub.sessionsUsed, sessionsLimit: activeSub.sessionsLimit };
+      sessionInfo = {
+        sessionsUsed: activeSub.sessionsUsed,
+        sessionsLimit: activeSub.sessionsLimit,
+        sessionsRemaining: Math.max(0, activeSub.sessionsLimit - activeSub.sessionsUsed),
+      };
     }
 
     // Send WhatsApp notification if available
@@ -305,17 +321,35 @@ export const getAttendance = async (req: Request, res: Response): Promise<any> =
         if (!r.member) return r;
         const sub = await Subscription.findOne({ member: r.member._id }).sort({ endDate: -1 });
         let membershipStatus = 'Expired';
+        let sessionInfo = null;
         if (sub) {
           const now = new Date();
-          if (sub.status === 'active' && sub.endDate >= now) {
-            membershipStatus = 'Active';
-          } else if (sub.status === 'frozen') {
+          const isSession = sub.subscriptionType === 'sessions';
+          const hasSessionsLeft = isSession && sub.sessionsLimit > 0 && (sub.sessionsUsed || 0) < sub.sessionsLimit;
+          const isDateValid = sub.endDate >= now;
+
+          if (sub.status === 'frozen') {
             membershipStatus = 'Frozen';
+          } else if (sub.status === 'active' && (isSession ? hasSessionsLeft : isDateValid)) {
+            membershipStatus = 'Active';
+          } else {
+            membershipStatus = 'Expired';
+          }
+
+          if (isSession) {
+            sessionInfo = {
+              sessionsUsed: sub.sessionsUsed || 0,
+              sessionsLimit: sub.sessionsLimit,
+              sessionsRemaining: Math.max(0, sub.sessionsLimit - (sub.sessionsUsed || 0)),
+            };
           }
         }
         const recordObj = r.toObject();
         if (recordObj.member) {
           recordObj.member.membershipStatus = membershipStatus;
+          if (sessionInfo) {
+            recordObj.member.sessionInfo = sessionInfo;
+          }
         }
         return recordObj;
       })
@@ -430,7 +464,12 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
 
     const now = new Date();
     const activeSub = await Subscription.findOne({
-      member: member._id, status: 'active', endDate: { $gte: now },
+      member: member._id,
+      status: 'active',
+      $or: [
+        { endDate: { $gte: now } },
+        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
+      ]
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
