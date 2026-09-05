@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export const PRODUCT_CATEGORIES = [
+  'ملابس رياضية',
   'كرياتين',
   'بروتين',
   'بروتين بار',
