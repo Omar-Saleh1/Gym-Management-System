@@ -3,8 +3,10 @@ import SingleVisit from '../models/SingleVisit';
 import Transaction from '../models/Transaction';
 import { AuthCashier, canAccessShift, getShiftFilter } from '../middleware/auth';
 import { getBusinessDayBounds, getBusinessDateString } from '../utils/businessDay';
+import { encryptPhone } from '../utils/crypto';
 
 const getCairoDayBounds = (dateStr?: string) => getBusinessDayBounds(dateStr);
+
 
 export const createSingleVisit = async (req: Request, res: Response): Promise<any> => {
   try {
@@ -117,6 +119,7 @@ export const getSingleVisits = async (req: Request, res: Response): Promise<any>
       const s = search.trim();
       query.$or = [
         { name: { $regex: s, $options: 'i' } },
+        { phone: encryptPhone(s) },
         { phone: { $regex: s, $options: 'i' } },
       ];
     }

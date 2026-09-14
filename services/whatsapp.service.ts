@@ -91,6 +91,25 @@ export async function initWhatsAppClient() {
   }
 }
 
+export async function restartWhatsApp() {
+  console.log('[WhatsApp] Restarting session...');
+  isConnected = false;
+  currentQrDataUrl = null;
+  isInitializing = false;
+  if (waSocket) {
+    try {
+      waSocket.ev.removeAllListeners('connection.update');
+      waSocket.ev.removeAllListeners('creds.update');
+      waSocket.end(new Error('Manual Restart'));
+    } catch (e) {
+      // ignore
+    }
+    waSocket = null;
+  }
+  await AuthModel.deleteMany({ sessionId: 'gym-system' }).catch(console.error);
+  return initWhatsAppClient();
+}
+
 // Helpers
 const normalisePhone = (phone: string): string => {
   const digits = phone.replace(/\D/g, '');

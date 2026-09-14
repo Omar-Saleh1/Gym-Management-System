@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { ICashier } from './Cashier';
 import { ITransaction } from './Transaction';
+import { encryptPhone, decryptPhone } from '../utils/crypto';
 
 export interface ISingleVisit extends Document {
   name: string;
@@ -21,7 +22,13 @@ const singleVisitSchema = new Schema<ISingleVisit>(
   {
     name:          { type: String, required: true, trim: true },
     sessionName:   { type: String, trim: true, default: 'حصة عامة' },
-    phone:         { type: String, trim: true, default: '' },
+    phone: {
+      type: String,
+      trim: true,
+      default: '',
+      set: (val: string) => (val ? encryptPhone(val) : ''),
+      get: (val: string) => (val ? decryptPhone(val) : ''),
+    },
     amount:        { type: Number, required: true, min: 1 },
     paymentMethod: { type: String, enum: ['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'], default: 'CASH' },
     shiftType:     { type: String, enum: ['GIRLS', 'BOYS'], required: true },
@@ -30,7 +37,11 @@ const singleVisitSchema = new Schema<ISingleVisit>(
     notes:         { type: String, default: '' },
     transactionId: { type: Schema.Types.ObjectId, ref: 'Transaction' },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { getters: true },
+    toObject: { getters: true },
+  }
 );
 
 singleVisitSchema.index({ visitedAt: -1 });

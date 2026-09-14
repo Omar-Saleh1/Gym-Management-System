@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import crypto from 'crypto';
-
+import { encryptPhone, decryptPhone } from '../utils/crypto';
 
 export interface IMember extends Document {
   name: string;
@@ -33,7 +33,12 @@ export function generateShortToken(length = 12): string {
 const memberSchema = new Schema<IMember>(
   {
     name:        { type: String, required: true },
-    phone:       { type: String, required: true },
+    phone: {
+      type: String,
+      required: true,
+      set: (val: string) => encryptPhone(val),
+      get: (val: string) => decryptPhone(val),
+    },
     email:       { type: String },
     gender:      { type: String, enum: ['male', 'female'], default: 'male' },
     dateOfBirth: { type: Date },
@@ -45,10 +50,16 @@ const memberSchema = new Schema<IMember>(
     isQrActive:  { type: Boolean, default: true },
     qrToken:     { type: String, unique: true, default: () => generateShortToken(12) },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { getters: true },
+    toObject: { getters: true },
+  }
 );
 
 memberSchema.index({ shiftType: 1, active: 1 });
+memberSchema.index({ phone: 1 });
 
 export default mongoose.model<IMember>('Member', memberSchema);
+
 

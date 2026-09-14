@@ -9,6 +9,7 @@ import Payment from '../models/Payment';
 import WorkoutPlan from '../models/WorkoutPlan';
 import DietPlan from '../models/DietPlan';
 import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
+import { encryptPhone } from '../utils/crypto';
 
 // ─── Helper: verify a member belongs to the cashier's shift ───────────────────
 const assertShiftAccess = async (cashier: AuthCashier, memberId: any, res: Response): Promise<any | null> => {
@@ -34,12 +35,18 @@ export const getMembers = async (req: Request, res: Response): Promise<any> => {
     const shiftFilter = getShiftFilter(cashier);
     const baseQuery = { active: { $ne: false }, ...shiftFilter };
 
-    const query = search
-      ? {
-          ...baseQuery,
-          $or: [{ name: new RegExp(search as string, 'i') }, { phone: new RegExp(search as string, 'i') }],
-        }
-      : baseQuery;
+    let query: any = baseQuery;
+    if (search && typeof search === 'string' && search.trim() !== '') {
+      const s = search.trim();
+      query = {
+        ...baseQuery,
+        $or: [
+          { name: new RegExp(s, 'i') },
+          { phone: encryptPhone(s) },
+          { phone: new RegExp(s, 'i') },
+        ],
+      };
+    }
 
     const members = await Member.find(query).sort({ createdAt: -1 });
     res.json(members);
@@ -88,7 +95,12 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
       return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
     }
 
-    const existingPhone = await Member.findOne({ phone: phone.trim(), active: true });
+    const cleanPhone = phone.trim();
+    const encryptedPhone = encryptPhone(cleanPhone);
+    const existingPhone = await Member.findOne({
+      $or: [{ phone: encryptedPhone }, { phone: cleanPhone }],
+      active: true,
+    });
     if (existingPhone) {
       return res.status(400).json({ message: 'رقم الموبايل مسجل بالفعل لعضو آخر' });
     }
@@ -109,7 +121,7 @@ export const createMember = async (req: Request, res: Response): Promise<any> =>
     const member = await Member.create({
       ...safeBody,
       name: name.trim(),
-      phone: phone.trim(),
+      phone: cleanPhone,
       email: email ? email.trim() : undefined,
       shiftType: assignedShiftType,
     });
@@ -138,8 +150,10 @@ export const updateMember = async (req: Request, res: Response): Promise<any> =>
       if (!phoneRegex.test(phone.trim())) {
         return res.status(400).json({ message: 'رقم الموبايل غير صحيح. يجب أن يكون رقم مصري مكون من 11 رقم يبدأ بـ 01' });
       }
+      const cleanPhone = phone.trim();
+      const encryptedPhone = encryptPhone(cleanPhone);
       const existingPhone = await Member.findOne({
-        phone: phone.trim(),
+        $or: [{ phone: encryptedPhone }, { phone: cleanPhone }],
         active: true,
         _id: { $ne: req.params.id },
       });
@@ -161,7 +175,7 @@ export const updateMember = async (req: Request, res: Response): Promise<any> =>
     const updateData: any = {
       ...safeBody,
       name: name ? name.trim() : undefined,
-      phone: phone ? phone.trim() : undefined,
+      phone: phone ? encryptPhone(phone.trim()) : undefined,
       email: email ? email.trim() : undefined,
     };
     // Only admin can change shiftType

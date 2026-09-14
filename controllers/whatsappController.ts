@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getLatestQrDataUrl, getWhatsAppStatus } from '../services/whatsapp.service';
+import { getLatestQrDataUrl, getWhatsAppStatus, restartWhatsApp, initWhatsAppClient } from '../services/whatsapp.service';
 
 function wantsJson(req: Request): boolean {
   if (req.query.format === 'json') return true;
@@ -12,17 +12,35 @@ export const getStatus = (_req: Request, res: Response) => {
   res.json(getWhatsAppStatus());
 };
 
-/** GET /api/whatsapp/qr — never creates a new client; reads cached QR/state only */
-export const getQrPage = (req: Request, res: Response) => {
+/** GET /api/whatsapp/restart */
+export const restartSession = async (_req: Request, res: Response) => {
+  await restartWhatsApp();
+  if (wantsJson(_req)) {
+    return res.json({ success: true, message: 'WhatsApp restarted' });
+  }
+  res.redirect('/api/whatsapp/qr');
+};
+
+/** GET /api/whatsapp/qr */
+export const getQrPage = async (req: Request, res: Response) => {
+  if (req.query.restart === '1' || req.query.restart === 'true') {
+    await restartWhatsApp();
+    return res.redirect('/api/whatsapp/qr');
+  }
+
   const statusInfo = getWhatsAppStatus();
-  const qrDataUrl = getLatestQrDataUrl();
+  let qrDataUrl = getLatestQrDataUrl();
+
+  if (!statusInfo.connected && !qrDataUrl) {
+    initWhatsAppClient();
+  }
 
   if (statusInfo.connected) {
     const payload = {
       ready: true,
       authenticated: true,
       statusMessage: statusInfo.status,
-      message: 'WhatsApp Connected Successfully',
+      message: 'واتساب متصل بالنظام بنجاح ✅',
     };
     return wantsJson(req) ? res.json(payload) : res.send(renderConnectedPage());
   }
@@ -33,10 +51,10 @@ export const getQrPage = (req: Request, res: Response) => {
         ready: false,
         authenticated: false,
         statusMessage: statusInfo.status,
-        message: 'QR not ready yet — please wait',
+        message: 'جاري تجهيز كود الـ QR، برجاء الانتظار ثوانٍ...',
       });
     }
-    return res.send(renderWaitingPage(statusInfo.status || 'Preparing QR code...'));
+    return res.send(renderWaitingPage(statusInfo.status || 'جاري تجهيز كود الـ QR...'));
   }
 
   if (wantsJson(req)) {
@@ -51,7 +69,7 @@ export const getQrPage = (req: Request, res: Response) => {
   res.send(renderQrPage(qrDataUrl));
 };
 
-// ─── HTML pages ──────────────────────────────────────────────────────────────
+// ─── Modern Arabic HTML Pages ──────────────────────────────────────────────────
 
 const STATUS_POLL_SCRIPT = `
 <script>
@@ -64,20 +82,21 @@ const STATUS_POLL_SCRIPT = `
       try {
         const res = await fetch('/api/whatsapp/status', { cache: 'no-store' });
         const data = await res.json();
-        if (statusEl) statusEl.textContent = data.statusMessage || 'unknown';
-
-        if (data.ready) {
+        
+        if (data.connected) {
           if (qrBox) qrBox.style.display = 'none';
           if (successBox) successBox.style.display = 'block';
-          document.title = 'WhatsApp Connected';
+          if (statusEl) statusEl.textContent = 'متصل بنجاح ✅';
+          document.title = 'واتساب متصل ✅';
+          setTimeout(() => window.location.reload(), 2000);
           return;
         }
 
-        if (data.authenticated && !data.ready) {
-          if (statusEl) statusEl.textContent = 'Authenticated — connecting...';
+        if (statusEl && data.status) {
+          statusEl.textContent = data.status === 'qr_ready' ? 'بانتظار المسح...' : data.status;
         }
-      } catch (_) { /* ignore poll errors */ }
-      setTimeout(poll, 3000);
+      } catch (_) { /* ignore */ }
+      setTimeout(poll, 2500);
     }
 
     poll();
@@ -86,44 +105,68 @@ const STATUS_POLL_SCRIPT = `
 
 function pageShell(title: string, body: string): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title}</title>
+  <title>${title} | VACUUM GYM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      margin: 0; padding: 24px 16px;
-      background: #f0f2f5; color: #111;
-      display: flex; justify-content: center; min-height: 100vh;
+      font-family: 'Cairo', -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 30px 16px;
+      background: #0f1117; color: #f3f4f6;
+      display: flex; justify-content: center; align-items: center; min-height: 100vh;
     }
     .card {
-      background: #fff; border-radius: 16px; padding: 28px 24px;
-      max-width: 420px; width: 100%; text-align: center;
-      box-shadow: 0 4px 24px rgba(0,0,0,.08);
+      background: #181b24; border-radius: 24px; padding: 32px 24px;
+      max-width: 440px; width: 100%; text-align: center;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
     }
-    h1 { font-size: 1.35rem; margin: 0 0 8px; }
-    p  { color: #555; margin: 8px 0; line-height: 1.5; }
-    .hint { font-size: .9rem; color: #888; }
+    h1 { font-size: 1.4rem; font-weight: 900; margin-bottom: 12px; color: #fff; }
+    p { color: #9ca3af; margin: 8px 0; font-size: 0.95rem; line-height: 1.6; }
+    .hint { font-size: 0.85rem; color: #6b7280; margin-top: 14px; }
     img.qr {
-      width: min(320px, 80vw); height: auto;
-      border: 4px solid #25D366; border-radius: 12px;
-      margin: 16px auto; display: block;
+      width: min(280px, 75vw); height: auto;
+      border: 4px solid #22c55e; border-radius: 16px;
+      margin: 18px auto; display: block;
+      background: #fff; padding: 10px;
+      box-shadow: 0 8px 30px rgba(34, 197, 94, 0.25);
     }
     .status {
-      display: inline-block; margin-top: 12px; padding: 6px 14px;
-      background: #e8f5e9; color: #2e7d32; border-radius: 20px;
-      font-size: .85rem; font-weight: 600;
+      display: inline-block; margin-top: 14px; padding: 6px 16px;
+      background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 20px; font-size: 0.85rem; font-weight: 700;
     }
-    .success { color: #25D366; font-size: 3rem; margin: 12px 0; }
-    .steps { text-align: left; margin: 16px 0; padding: 0 0 0 20px; color: #444; font-size: .95rem; }
-    .steps li { margin: 6px 0; }
+    .status.waiting {
+      background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);
+    }
+    .success-icon { font-size: 3.5rem; margin: 12px 0; }
+    .steps {
+      text-align: right; margin: 18px 0; padding: 14px 18px;
+      background: rgba(255,255,255,0.03); border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.05); color: #d1d5db; font-size: 0.9rem;
+    }
+    .steps ol { padding-right: 20px; }
+    .steps li { margin: 8px 0; line-height: 1.5; }
+    .btn-restart {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      margin-top: 16px; padding: 10px 20px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px; color: #d1d5db; font-family: inherit; font-size: 0.9rem;
+      font-weight: 700; cursor: pointer; text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-restart:hover {
+      background: rgba(255,255,255,0.12); color: #fff;
+    }
     .loader {
-      width: 48px; height: 48px; border: 4px solid #e0e0e0;
-      border-top-color: #25D366; border-radius: 50%;
-      animation: spin .8s linear infinite; margin: 20px auto;
+      width: 50px; height: 50px; border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: #22c55e; border-radius: 50%;
+      animation: spin .8s linear infinite; margin: 24px auto;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -136,45 +179,69 @@ function pageShell(title: string, body: string): string {
 }
 
 function renderConnectedPage(): string {
-  return pageShell('WhatsApp Connected', `
-    <div class="success">✅</div>
-    <h1>WhatsApp Connected Successfully</h1>
-    <p>Messages can be sent now.</p>
-    <span class="status">ready</span>
-    <p class="hint"><a href="/api/whatsapp/status">View status (JSON)</a></p>
+  return pageShell('واتساب متصل', `
+    <div class="success-icon">✅</div>
+    <h1>واتساب متصل بالنظام بنجاح</h1>
+    <p>النظام جاهز الآن لإرسال إشعارات الحضور وتجديد الاشتراكات ورسائل الترحيب للعملاء.</p>
+    <span class="status">متصل وجاهز</span>
+    <div style="margin-top: 24px;">
+      <a href="/api/whatsapp/restart" class="btn-restart" style="color: #f87171; border-color: rgba(239,68,68,0.3);">
+        🔄 تسجيل الخروج وإعادة الربط برقم آخر
+      </a>
+    </div>
   `);
 }
 
 function renderWaitingPage(message: string): string {
-  return pageShell('WhatsApp — Loading', `
+  return pageShell('جاري تجهيز الكود...', `
     <div class="loader"></div>
-    <h1>Please wait...</h1>
+    <h1>جاري تجهيز كود الواتساب...</h1>
     <p id="status-text">${message}</p>
-    <p class="hint">This page refreshes status automatically.</p>
-    <div id="success-box" style="display:none">
-      <div class="success">✅</div>
-      <h1>WhatsApp Connected Successfully</h1>
+    <span class="status waiting">يرجى الانتظار بضع ثوانٍ</span>
+    <div style="margin-top: 20px;">
+      <a href="/api/whatsapp/qr?restart=1" class="btn-restart">
+        🔄 إعادة المحاولة الآن
+      </a>
+    </div>
+    <div id="success-box" style="display:none; margin-top:20px;">
+      <div class="success-icon">✅</div>
+      <h1>تم الاتصال بنجاح!</h1>
     </div>
   `);
 }
 
 function renderQrPage(qrDataUrl: string): string {
-  return pageShell('Scan WhatsApp QR', `
-    <h1>Scan this QR with WhatsApp</h1>
-    <ol class="steps">
-      <li>Open WhatsApp on your phone</li>
-      <li>Go to <strong>Linked Devices</strong></li>
-      <li>Tap <strong>Link a Device</strong></li>
-      <li>Scan the QR code below</li>
-    </ol>
+  return pageShell('ربط واتساب النظام', `
+    <h1>📲 ربط واتساب بنظام الجيم</h1>
+    
+    <div class="steps">
+      <ol>
+        <li>افتح تطبيق <strong>WhatsApp</strong> على هاتفك.</li>
+        <li>اضغط على <strong>القائمة (⋮)</strong> أو <strong>الإعدادات</strong>.</li>
+        <li>اختر <strong>«الأجهزة المرتبطة» (Linked Devices)</strong>.</li>
+        <li>اضغط على <strong>«ربط جهاز»</strong> ووجّه الكاميرا نحو الكود:</li>
+      </ol>
+    </div>
+
     <div id="qr-box">
       <img class="qr" src="${qrDataUrl}" alt="WhatsApp QR Code" />
     </div>
+
     <div id="success-box" style="display:none">
-      <div class="success">✅</div>
-      <h1>WhatsApp Connected Successfully</h1>
+      <div class="success-icon">✅</div>
+      <h1>تم ربط الواتساب بنجاح!</h1>
+      <p>جاري تحديث الصفحة...</p>
     </div>
-    <span class="status" id="status-text">waiting_for_scan</span>
-    <p class="hint">Status updates every 3 seconds</p>
+
+    <div>
+      <span class="status waiting" id="status-text">بانتظار المسح من الهاتف...</span>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <a href="/api/whatsapp/qr?restart=1" class="btn-restart">
+        🔄 كود جديد / إعادة تشغيل
+      </a>
+    </div>
   `);
 }
+
