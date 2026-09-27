@@ -11,6 +11,7 @@ import {
   regenerateMemberQr,
   toggleMemberQr,
   getMemberProfile,
+  sendMemberQrWhatsAppController,
 } from '../controllers/memberController';
 
 const router = express.Router();
@@ -31,6 +32,7 @@ router.delete('/:id', deleteMember);
 router.get('/:id/qr', getMemberQrCode);
 router.post('/:id/qr/regenerate', regenerateMemberQr);
 router.patch('/:id/qr', toggleMemberQr);
+router.post('/:id/send-qr-whatsapp', sendMemberQrWhatsAppController);
 
 // Profile (full data aggregation)
 router.get('/:id/profile', getMemberProfile);

@@ -11,11 +11,12 @@ import { IMember } from '../models/Member';
 import { ISubscription } from '../models/Subscription';
 
 interface SendOptions {
-  member:      IMember & { _id: any };
-  type:        NotificationType;
-  message:     string;
+  member:       IMember & { _id: any };
+  type:         NotificationType;
+  message:      string;
   referenceId?: string;
-  metadata?:   Record<string, any>;
+  metadata?:    Record<string, any>;
+  bypassDedup?: boolean;
 }
 
 // ─── Core send with dedup guard ──────────────────────────────────────────────
@@ -25,23 +26,25 @@ interface SendOptions {
  * for the same (member + type + referenceId).
  */
 export async function sendNotification(opts: SendOptions): Promise<boolean> {
-  const { member, type, message, referenceId, metadata } = opts;
+  const { member, type, message, referenceId, metadata, bypassDedup } = opts;
 
-  // Deduplication: don't send the same notification twice today
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Deduplication: don't send the same notification twice today unless explicitly bypassed
+  if (!bypassDedup) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-  const alreadySent = await NotificationLog.findOne({
-    member:      member._id,
-    type,
-    referenceId: referenceId || null,
-    status:      'sent',
-    createdAt:   { $gte: todayStart },
-  });
+    const alreadySent = await NotificationLog.findOne({
+      member:      member._id,
+      type,
+      referenceId: referenceId || null,
+      status:      'sent',
+      createdAt:   { $gte: todayStart },
+    });
 
-  if (alreadySent) {
-    console.log(`[Notification] Skipped duplicate: ${type} for ${member.name}`);
-    return false;
+    if (alreadySent) {
+      console.log(`[Notification] Skipped duplicate: ${type} for ${member.name}`);
+      return false;
+    }
   }
 
   // Create a pending log entry
@@ -176,3 +179,16 @@ export async function notifySubscriptionUnfrozen(
     referenceId: String(subscription._id),
   });
 }
+
+export async function sendMemberQrWhatsApp(member: IMember & { _id: any; qrToken?: string }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const qrLink = `${frontendUrl}/member/qr/${member.qrToken || ''}`;
+
+  return sendNotification({
+    member: member as any,
+    type:        'payment_success',
+    message:     templates.qrLinkOnly(member.name, qrLink),
+    bypassDedup: true,
+  });
+}
+

@@ -10,6 +10,7 @@ import WorkoutPlan from '../models/WorkoutPlan';
 import DietPlan from '../models/DietPlan';
 import { getShiftFilter, canAccessShift, AuthCashier } from '../middleware/auth';
 import { encryptPhone } from '../utils/crypto';
+import { sendMemberQrWhatsApp as sendQrViaWhatsApp } from '../services/notification.service';
 
 // ─── Helper: verify a member belongs to the cashier's shift ───────────────────
 const assertShiftAccess = async (cashier: AuthCashier, memberId: any, res: Response): Promise<any | null> => {
@@ -405,3 +406,28 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// ─── POST /api/members/:id/send-qr-whatsapp ───────────────────────────────────
+export const sendMemberQrWhatsAppController = async (req: Request, res: Response): Promise<any> => {
+  try {
+    const cashier: AuthCashier = (req as any).cashier;
+    const member = await assertShiftAccess(cashier, req.params.id, res);
+    if (!member) return;
+
+    // Ensure member has a valid qrToken
+    if (!member.qrToken) {
+      member.qrToken = generateShortToken(12);
+      await member.save();
+    }
+
+    const sent = await sendQrViaWhatsApp(member);
+    if (!sent) {
+      return res.status(400).json({ success: false, message: 'تعذر إرسال الرسالة، يرجى التأكد من اتصال الواتساب أو صحة الرقم' });
+    }
+
+    res.json({ success: true, message: 'تم إرسال رابط كود الـ QR عبر الواتساب بنجاح' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+

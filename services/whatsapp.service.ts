@@ -110,34 +110,64 @@ export async function restartWhatsApp() {
   return initWhatsAppClient();
 }
 
+import { decryptPhone } from '../utils/crypto';
+
 // Helpers
-const normalisePhone = (phone: string): string => {
+// Convert Arabic-Indic numerals (٠-٩) to standard ASCII digits (0-9)
+const convertArabicDigits = (str: string): string => {
+  const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  return str.replace(/[٠-٩]/g, (w) => String(arabicDigits.indexOf(w)));
+};
+
+export const normalisePhone = (rawPhone: string): string => {
+  if (!rawPhone || typeof rawPhone !== 'string') return '';
+  // 1. Decrypt if encrypted (e.g. "enc:...")
+  let phone = decryptPhone(rawPhone);
+  // 2. Convert Arabic digits
+  phone = convertArabicDigits(phone);
+  // 3. Extract digits only
   const digits = phone.replace(/\D/g, '');
+  if (!digits) return '';
+
   if (digits.startsWith('0')) return '20' + digits.slice(1);
   if (digits.startsWith('20')) return digits;
   return '20' + digits;
 };
 
-// Main send function
+// Main send function with auto-wait if reconnecting
 export async function sendWhatsApp(rawPhone: string, message: string): Promise<void> {
   const phone = normalisePhone(rawPhone);
   
+  if (!phone || phone.length < 11) {
+    console.error(`[WhatsApp] Invalid phone number after normalization: "${rawPhone}" -> "${phone}"`);
+    throw new Error(`رقم الهاتف غير صالح: ${rawPhone}`);
+  }
+
   if (PROVIDER !== 'local') {
     console.log(`\n[WhatsApp MOCK] -> +${phone}\nMessage: ${message}\n`);
     return;
   }
 
+  // If initializing, wait up to 4 seconds for connection
+  if (!isConnected && isInitializing) {
+    console.log('[WhatsApp] Client is reconnecting, waiting up to 4 seconds...');
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      if (isConnected && waSocket) break;
+    }
+  }
+
   if (!isConnected || !waSocket) {
     console.warn('[WhatsApp] Cannot send message, client not connected.');
-    return;
+    throw new Error('خدمة الواتساب غير متصلة حالياً على السيرفر');
   }
 
   try {
     const formattedPhone = phone + '@s.whatsapp.net';
     await waSocket.sendMessage(formattedPhone, { text: message });
-    console.log(`[WhatsApp] Message sent to ${formattedPhone}`);
+    console.log(`[WhatsApp] ✅ Message sent to ${formattedPhone}`);
   } catch (err: any) {
-    console.error('[WhatsApp] Send error:', err);
+    console.error('[WhatsApp] ❌ Send error:', err);
     throw err;
   }
 }
@@ -164,6 +194,9 @@ export const templates = {
 
   newMembership: (name: string) =>
     `أهلاً بك يا ${name} في الجيم!\n\nيسعدنا انضمامك إلينا. نتمنى لك تجربة رياضية ممتازة وتحقيق أهدافك معنا. أهلاً بك في عائلتنا!`,
+
+  qrLinkOnly: (name: string, qrLink: string) =>
+    `مرحباً ${name}،\n\nإليك رابط كود الـ QR الخاص بك في الجيم:\n${qrLink}\n\nيرجى فتح الرابط ومسحه عند الحضور. نتمنى لك تمريناً رائعاً! 💪`,
 
   birthday: (name: string) =>
     `كل عام وأنت بخير يا ${name}!\n\nنتمنى لك سنة جديدة سعيدة ومليئة بالصحة والنجاح من عائلة الجيم. استمتع بيومك!`,
