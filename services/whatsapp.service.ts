@@ -175,38 +175,39 @@ export async function sendWhatsApp(rawPhone: string, message: string): Promise<v
 // Message templates
 export const templates = {
   expiry1Day: (name: string, expiryDate: string) =>
-    `أهلاً ${name}،\n\nتذكير: اشتراكك في الجيم سينتهي غداً ${expiryDate}.\n\nنرجو تجديده في أقرب وقت لتجنب الإيقاف.`,
+    `أهلاً ${name}،\n\nتذكير من VACUUM GYM: اشتراكك سينتهي غداً ${expiryDate}.\n\nنرجو تجديده في أقرب وقت لتجنب الإيقاف. في انتظارك! 🏋️‍♂️`,
 
   expiry3Days: (name: string, expiryDate: string) =>
-    `أهلاً ${name}،\n\nاشتراكك في الجيم سينتهي بعد 3 أيام في ${expiryDate}.\n\nنرجو تجديده قريباً، ولا تنسَ تمرينك!`,
+    `أهلاً ${name}،\n\nتذكير من VACUUM GYM: اشتراكك سينتهي بعد 3 أيام في ${expiryDate}.\n\nنرجو تجديده قريباً، ولا تنسَ تمرينك! 🏋️‍♂️`,
 
   expiry7Days: (name: string, expiryDate: string) =>
-    `أهلاً ${name}،\n\nاشتراكك في الجيم سينتهي بعد أسبوع في ${expiryDate}.\n\nنتمنى لك استمراراً مليئاً بالنشاط!`,
+    `أهلاً ${name}،\n\nاشتراكك في VACUUM GYM سينتهي بعد أسبوع في ${expiryDate}.\n\nنتمنى لك استمراراً مليئاً بالنشاط! 🔥`,
 
   expired: (name: string) =>
-    `عفواً ${name}،\n\nاشتراكك في الجيم انتهى. نرجو تجديد الاشتراك لمتابعة التمارين. في انتظارك!`,
+    `عفواً ${name}،\n\nاشتراكك في VACUUM GYM انتهى. نرجو تجديد الاشتراك لمتابعة التمارين. في انتظارك! 🏋️‍♂️`,
 
   paymentSuccess: (name: string, planName: string, endDate: string, qrLink: string) =>
-    `مرحباً ${name}،\n\nتم تجديد اشتراكك في "${planName}" بنجاح.\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً!`,
+    `مرحباً ${name}،\n\nتم تجديد اشتراكك في VACUUM GYM ("${planName}") بنجاح! 🏋️‍♂️\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً معنا! 💪`,
 
   newSubscription: (name: string, planName: string, endDate: string, qrLink: string) =>
-    `مرحباً ${name}،\n\nأهلاً بك في عائلتنا! تم تفعيل اشتراكك في "${planName}" بنجاح.\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً!`,
+    `مرحباً ${name}،\n\nأهلاً بك في عائلة VACUUM GYM! تم تفعيل اشتراكك في "${planName}" بنجاح! 🏋️‍♂️🔥\n\nتاريخ الانتهاء: ${endDate}\n\nيرجى فتح رابط الـ QR الخاص بك ومسحه عند الحضور:\n${qrLink}\n\nنتمنى لك تمريناً رائعاً وتحقيق أهدافك معنا! 💪`,
 
   newMembership: (name: string) =>
-    `أهلاً بك يا ${name} في الجيم!\n\nيسعدنا انضمامك إلينا. نتمنى لك تجربة رياضية ممتازة وتحقيق أهدافك معنا. أهلاً بك في عائلتنا!`,
+    `أهلاً بك يا ${name} في VACUUM GYM!\n\nيسعدنا انضمامك إلينا. نتمنى لك تجربة رياضية ممتازة وتحقيق أهدافك معنا. أهلاً بك في عائلتنا! 🏋️‍♂️💪`,
 
   qrLinkOnly: (name: string, qrLink: string) =>
-    `مرحباً ${name}،\n\nإليك رابط كود الـ QR الخاص بك في الجيم:\n${qrLink}\n\nيرجى فتح الرابط ومسحه عند الحضور. نتمنى لك تمريناً رائعاً! 💪`,
+    `مرحباً ${name}،\n\nإليك رابط كود الـ QR الخاص بك في VACUUM GYM:\n${qrLink}\n\nيرجى فتح الرابط ومسحه عند الحضور. نتمنى لك تمريناً رائعاً! 💪`,
 
   birthday: (name: string) =>
-    `كل عام وأنت بخير يا ${name}!\n\nنتمنى لك سنة جديدة سعيدة ومليئة بالصحة والنجاح من عائلة الجيم. استمتع بيومك!`,
+    `كل عام وأنت بخير يا ${name}!\n\nنتمنى لك سنة جديدة سعيدة ومليئة بالصحة والنجاح من عائلة VACUUM GYM. استمتع بيومك! 🎂🎉`,
 
   subscriptionFrozen: (name: string, freezeEndDate: string) =>
-    `مرحباً ${name}،\n\nتم تجميد (Freeze) اشتراكك في الجيم بناءً على طلبك بنجاح.\n\nتاريخ انتهاء التجميد: ${freezeEndDate}\n\nننتظر عودتك بكل حماس!`,
+    `مرحباً ${name}،\n\nتم تجميد (Freeze) اشتراكك في VACUUM GYM بناءً على طلبك بنجاح.\n\nتاريخ انتهاء التجميد: ${freezeEndDate}\n\nننتظر عودتك بكل حماس! ❄️`,
 
   subscriptionUnfrozen: (name: string, newEndDate: string) =>
-    `أهلاً ${name}،\n\nتم إلغاء تجميد اشتراكك بنجاح.\n\nتاريخ الانتهاء الجديد هو: ${newEndDate}\n\nيلا بينا نرجع للتمرين بقوة! 🏋️‍♂️`,
+    `أهلاً ${name}،\n\nتم إلغاء تجميد اشتراكك في VACUUM GYM بنجاح.\n\nتاريخ الانتهاء الجديد هو: ${newEndDate}\n\nيلا بينا نرجع للتمرين بقوة! 🏋️‍♂️💪`,
 
   checkInSuccess: (name: string, time: string) =>
-    `أهلاً يا ${name}،\n\nتم تسجيل حضورك في الجيم اليوم بنجاح في تمام الساعة ${time}.\n\nنتمنى لك تمرينة وحش! 🏋️‍♂️💪`,
+    `أهلاً يا ${name}،\n\nتم تسجيل حضورك اليوم في VACUUM GYM بنجاح في تمام الساعة ${time}.\n\nنتمنى لك تمرينة وحش! 🏋️‍♂️💪`,
 };
+
