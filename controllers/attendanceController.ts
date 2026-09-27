@@ -10,18 +10,51 @@ import { getBusinessDateString, getCairoNow, getBusinessDayBounds, getBusinessMo
 const todayString = () => getBusinessDateString();
 
 
+// Arabic keyboard to English QWERTY character map
+const ARABIC_KEY_MAP: Record<string, string> = {
+  'ض': 'q', 'ص': 'w', 'ث': 'e', 'ق': 'r', 'ف': 't', 'غ': 'y', 'ع': 'u', 'ه': 'i', 'خ': 'o', 'ح': 'p', 'ج': '[', 'د': ']',
+  'ش': 'a', 'س': 's', 'ي': 'd', 'ب': 'f', 'ل': 'g', 'ا': 'h', 'ت': 'j', 'ن': 'k', 'م': 'l', 'ك': ';', 'ط': "'",
+  'ئ': 'z', 'ء': 'x', 'ؤ': 'c', 'ر': 'v', 'لا': 'b', 'ى': 'n', 'ة': 'm', 'و': ',', 'ز': '.', 'ظ': '/',
+};
+
+const cleanQrToken = (rawInput: string): string => {
+  if (!rawInput) return '';
+  let str = String(rawInput).trim();
+  
+  // If it's a URL, extract the token
+  if (str.includes('/qr/')) {
+    const afterQr = str.split('/qr/').pop() || '';
+    str = afterQr.split('?')[0].split('#')[0].trim();
+  } else if (str.startsWith('http://') || str.startsWith('https://')) {
+    str = str.split('/').pop()?.split('?')[0].split('#')[0].trim() || str;
+  }
+
+  // Convert Arabic keyboard letters to English
+  let converted = '';
+  for (const ch of str) {
+    converted += ARABIC_KEY_MAP[ch] || ch;
+  }
+  return converted.trim() || str;
+};
+
 // ─── QR Scan (smart: checkin → checkout toggle) ───────────────────────────────
 
 export const scanQR = async (req: Request, res: Response): Promise<any> => {
   try {
     const cashier: AuthCashier = (req as any).cashier;
-    const qrToken = req.body.qrToken || req.body.code || req.body.qrCode;
-    if (!qrToken) return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
+    const rawToken = req.body.qrToken || req.body.code || req.body.qrCode;
+    if (!rawToken) return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
 
-    const token = String(qrToken).trim();
+    const token = cleanQrToken(String(rawToken));
 
-    // 1. Find member by qrToken field or fallback to ObjectId
+    // 1. Find member by qrToken field, fallback to raw, case-insensitive, or ObjectId
     let member = await Member.findOne({ qrToken: token });
+    if (!member && rawToken !== token) {
+      member = await Member.findOne({ qrToken: String(rawToken).trim() });
+    }
+    if (!member) {
+      member = await Member.findOne({ qrToken: { $regex: new RegExp(`^${token}$`, 'i') } });
+    }
     if (!member && mongoose.Types.ObjectId.isValid(token)) {
       member = await Member.findById(token);
     }
