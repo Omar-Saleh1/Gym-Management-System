@@ -208,6 +208,6 @@ export const templates = {
     `أهلاً ${name}،\n\nتم إلغاء تجميد اشتراكك في VACUUM GYM بنجاح.\n\nتاريخ الانتهاء الجديد هو: ${newEndDate}\n\nيلا بينا نرجع للتمرين بقوة! 🏋️‍♂️💪`,
 
   checkInSuccess: (name: string, time: string) =>
-    `أهلاً يا ${name}،\n\nتم تسجيل حضورك اليوم في VACUUM GYM بنجاح في تمام الساعة ${time}.\n\nنتمنى لك تمرينة وحش! 🏋️‍♂️💪`,
+    `أهلاً يا ${name}،\n\nتم تسجيل حضورك اليوم في VACUUM GYM بنجاح في تمام الساعة ${time}.`,
 };
 
