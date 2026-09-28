@@ -47,6 +47,9 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
 
     const token = cleanQrToken(String(rawToken));
 
+    console.log('[QR SCAN] rawToken:', JSON.stringify(rawToken));
+    console.log('[QR SCAN] cleanedToken:', JSON.stringify(token));
+
     // 1. Find member by qrToken field, fallback to raw, case-insensitive, or ObjectId
     let member = await Member.findOne({ qrToken: token });
     if (!member && rawToken !== token) {
@@ -58,6 +61,8 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     if (!member && mongoose.Types.ObjectId.isValid(token)) {
       member = await Member.findById(token);
     }
+
+    console.log('[QR SCAN] member found:', member ? member.name : 'NOT FOUND');
 
     if (!member) {
       return res.status(404).json({ success: false, message: 'العضو غير موجود' });

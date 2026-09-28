@@ -241,6 +241,12 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
       return res.status(403).json({ success: false, message: 'كود الـ QR معطل لهذا العضو' });
     }
 
+    // Auto-generate qrToken if missing (legacy members)
+    if (!member.qrToken) {
+      member.qrToken = generateShortToken(12);
+      await member.save();
+    }
+
     const now = new Date();
     // Check frozen first
     const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
@@ -307,6 +313,12 @@ export const getMemberQrCode = async (req: Request, res: Response): Promise<any>
 
     if (!member.isQrActive) {
       return res.status(400).json({ message: 'الـ QR الخاص بهذا العضو معطل' });
+    }
+
+    // Auto-generate qrToken if missing (legacy members)
+    if (!member.qrToken) {
+      member.qrToken = generateShortToken(12);
+      await member.save();
     }
 
     const qrDataUrl = await QRCode.toDataURL(member.qrToken);
