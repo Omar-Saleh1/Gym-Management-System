@@ -17,6 +17,22 @@ const ARABIC_KEY_MAP: Record<string, string> = {
   'ئ': 'z', 'ء': 'x', 'ؤ': 'c', 'ر': 'v', 'لا': 'b', 'ى': 'n', 'ة': 'm', 'و': ',', 'ز': '.', 'ظ': '/',
 };
 
+const decodeNumericAscii = (str: string): string => {
+  if (/^(\d{3})+$/.test(str) && str.length >= 12 && str.length % 3 === 0) {
+    let decoded = '';
+    for (let i = 0; i < str.length; i += 3) {
+      const code = parseInt(str.substring(i, i + 3), 10);
+      if (code >= 32 && code <= 126) {
+        decoded += String.fromCharCode(code);
+      } else {
+        return '';
+      }
+    }
+    return decoded;
+  }
+  return '';
+};
+
 const cleanQrToken = (rawInput: string): string => {
   if (!rawInput) return '';
   let str = String(rawInput).trim();
@@ -27,6 +43,12 @@ const cleanQrToken = (rawInput: string): string => {
     str = afterQr.split('?')[0].split('#')[0].trim();
   } else if (str.startsWith('http://') || str.startsWith('https://')) {
     str = str.split('/').pop()?.split('?')[0].split('#')[0].trim() || str;
+  }
+
+  // Convert numeric ASCII sequence if sent by hardware scanner (e.g. 068098077... -> DbMIIHWxrBDp)
+  const asciiDecoded = decodeNumericAscii(str);
+  if (asciiDecoded) {
+    str = asciiDecoded;
   }
 
   // Convert Arabic keyboard letters to English
@@ -45,21 +67,29 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     const rawToken = req.body.qrToken || req.body.code || req.body.qrCode;
     if (!rawToken) return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
 
-    const token = cleanQrToken(String(rawToken));
+    const rawStr = String(rawToken).trim();
+    const token = cleanQrToken(rawStr);
+    const decodedAscii = decodeNumericAscii(rawStr);
 
     console.log('[QR SCAN] rawToken:', JSON.stringify(rawToken));
     console.log('[QR SCAN] cleanedToken:', JSON.stringify(token));
+    if (decodedAscii) console.log('[QR SCAN] decodedAscii:', JSON.stringify(decodedAscii));
 
-    // 1. Find member by qrToken field, fallback to raw, case-insensitive, or ObjectId
-    let member = await Member.findOne({ qrToken: token });
-    if (!member && rawToken !== token) {
-      member = await Member.findOne({ qrToken: String(rawToken).trim() });
+    const searchTokens = Array.from(new Set([token, decodedAscii, rawStr].filter(Boolean)));
+
+    // 1. Find member by qrToken field (checking cleaned token, decoded ascii, or raw token)
+    let member = await Member.findOne({ qrToken: { $in: searchTokens } });
+    if (!member) {
+      const regexPattern = `^(${searchTokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`;
+      member = await Member.findOne({ qrToken: { $regex: new RegExp(regexPattern, 'i') } });
     }
     if (!member) {
-      member = await Member.findOne({ qrToken: { $regex: new RegExp(`^${token}$`, 'i') } });
-    }
-    if (!member && mongoose.Types.ObjectId.isValid(token)) {
-      member = await Member.findById(token);
+      for (const t of searchTokens) {
+        if (mongoose.Types.ObjectId.isValid(t)) {
+          member = await Member.findById(t);
+          if (member) break;
+        }
+      }
     }
 
     console.log('[QR SCAN] member found:', member ? member.name : 'NOT FOUND');
@@ -469,11 +499,23 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
       return res.status(400).json({ success: false, message: 'رمز الـ QR مطلوب' });
     }
 
-    const token = String(qrCode).trim();
+    const rawStr = String(qrCode).trim();
+    const token = cleanQrToken(rawStr);
+    const decodedAscii = decodeNumericAscii(rawStr);
+    const searchTokens = Array.from(new Set([token, decodedAscii, rawStr].filter(Boolean)));
 
-    let member = await Member.findOne({ qrToken: token });
-    if (!member && mongoose.Types.ObjectId.isValid(token)) {
-      member = await Member.findById(token);
+    let member = await Member.findOne({ qrToken: { $in: searchTokens } });
+    if (!member) {
+      const regexPattern = `^(${searchTokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`;
+      member = await Member.findOne({ qrToken: { $regex: new RegExp(regexPattern, 'i') } });
+    }
+    if (!member) {
+      for (const t of searchTokens) {
+        if (mongoose.Types.ObjectId.isValid(t)) {
+          member = await Member.findById(t);
+          if (member) break;
+        }
+      }
     }
 
     if (!member) {
