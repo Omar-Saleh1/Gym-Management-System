@@ -65,16 +65,12 @@ export async function initWhatsAppClient() {
         currentQrDataUrl = null;
         isInitializing = false;
         
-        const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log('[WhatsApp] Connection closed. Reconnect:', shouldReconnect);
-        
-        if (shouldReconnect) {
-          setTimeout(initWhatsAppClient, 5000);
-        } else {
-          console.log('[WhatsApp] Logged out. Wiping MongoDB auth state to restart.');
-          await AuthModel.deleteMany({ sessionId: 'gym-system' }).catch(console.error);
-          setTimeout(initWhatsAppClient, 5000);
-        }
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        console.log('[WhatsApp] Connection closed. Status code:', statusCode);
+
+        // Do NOT wipe MongoDB auth state automatically on server restarts or socket drops!
+        // Always attempt reconnect after 5 seconds using saved MongoDB auth state.
+        setTimeout(initWhatsAppClient, 5000);
       }
 
       if (connection === 'open') {
