@@ -125,8 +125,8 @@ export async function notifyPaymentSuccess(
   isRenewal: boolean = true
 ) {
   const endDate = new Date(subscription.endDate).toLocaleDateString('ar-EG');
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  const qrLink = `${frontendUrl}/member/qr/${member.qrToken || ''}`;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://system-gym.vercel.app';
+  const qrLink = `${frontendUrl.replace(/\/$/, '')}/member/qr/${member.qrToken || ''}`;
 
   return sendNotification({
     member: member as any,
@@ -181,8 +181,8 @@ export async function notifySubscriptionUnfrozen(
 }
 
 export async function sendMemberQrWhatsApp(member: IMember & { _id: any; qrToken?: string }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  const qrLink = `${frontendUrl}/member/qr/${member.qrToken || ''}`;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://system-gym.vercel.app';
+  const qrLink = `${frontendUrl.replace(/\/$/, '')}/member/qr/${member.qrToken || ''}`;
 
   return sendNotification({
     member: member as any,
