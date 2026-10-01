@@ -121,11 +121,22 @@ const convertArabicDigits = (str: string): string => {
 
 export const normalisePhone = (rawPhone: string): string => {
   if (!rawPhone || typeof rawPhone !== 'string') return '';
-  // 1. Decrypt if encrypted (e.g. "enc:...")
-  let phone = decryptPhone(rawPhone);
-  // 2. Convert Arabic digits
+  
+  let phone = rawPhone;
+  // If encrypted with enc: prefix, attempt decryption
+  if (phone.startsWith('enc:')) {
+    const decrypted = decryptPhone(phone);
+    if (decrypted && decrypted !== phone && !decrypted.startsWith('enc:')) {
+      phone = decrypted;
+    } else {
+      // Fallback: strip prefix if decryption produced same string or error
+      phone = phone.replace(/^enc:/, '');
+    }
+  }
+
+  // Convert Arabic digits
   phone = convertArabicDigits(phone);
-  // 3. Extract digits only
+  // Extract digits only
   const digits = phone.replace(/\D/g, '');
   if (!digits) return '';
 
