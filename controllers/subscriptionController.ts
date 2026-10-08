@@ -180,12 +180,14 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
     const startDate = ((cashier.role === 'admin' || cashier.shiftType === 'BOYS') && req.body.startDate)
       ? new Date(`${req.body.startDate}T12:00:00.000Z`)
       : new Date();
-    const endDate = new Date(startDate);
-
-    // Session-based: give 30-day window regardless; expiry is controlled by sessionsUsed >= sessionsLimit
-    // Days-based: use plan.durationInDays
     const isSessions = plan.subscriptionType === 'sessions';
-    endDate.setDate(endDate.getDate() + (isSessions ? 30 : plan.durationInDays));
+    let endDate: Date;
+    if (req.body.endDate) {
+      endDate = new Date(`${req.body.endDate}T23:59:59.000Z`);
+    } else {
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + (isSessions ? 30 : plan.durationInDays));
+    }
 
     const subscription = await Subscription.create({
       member: memberId,
