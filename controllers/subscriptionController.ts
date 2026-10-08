@@ -189,21 +189,45 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
       endDate.setDate(endDate.getDate() + (isSessions ? 30 : plan.durationInDays));
     }
 
-    const subscription = await Subscription.create({
-      member: memberId,
-      plan: planId,
-      startDate,
-      endDate,
-      pricePaid: totalAmount,
-      paymentMethod: paymentMethod || 'CASH',
-      createdBy: (req as any).cashier.id || (req as any).cashier._id,
-      notes: req.body.notes || '',
-      subscriptionType: plan.subscriptionType || 'days',
-      sessionsLimit: isSessions ? (plan.sessionsLimit || 0) : 0,
-      sessionsUsed: 0,
-    });
+    // Check if member already has an existing subscription record
+    let subscription = await Subscription.findOne({ member: memberId }).sort({ endDate: -1 });
+    const isRenewal = !!subscription;
 
-    // Reactivate Member QR automatically
+    if (subscription) {
+      // UPDATE existing subscription for this member (Renewal / Upgrade)
+      subscription.plan = planId;
+      subscription.startDate = startDate;
+      subscription.endDate = endDate;
+      subscription.pricePaid = totalAmount;
+      subscription.paymentMethod = paymentMethod || 'CASH';
+      subscription.createdBy = (req as any).cashier.id || (req as any).cashier._id;
+      subscription.notes = req.body.notes || '';
+      subscription.subscriptionType = plan.subscriptionType || 'days';
+      subscription.sessionsLimit = isSessions ? (plan.sessionsLimit || 0) : 0;
+      subscription.sessionsUsed = 0; // Reset sessions to 0
+      subscription.status = 'active'; // Mark active again!
+      subscription.freezeStartDate = undefined;
+      subscription.freezeEndDate = undefined;
+      await subscription.save();
+    } else {
+      // CREATE new subscription record if first time
+      subscription = await Subscription.create({
+        member: memberId,
+        plan: planId,
+        startDate,
+        endDate,
+        pricePaid: totalAmount,
+        paymentMethod: paymentMethod || 'CASH',
+        createdBy: (req as any).cashier.id || (req as any).cashier._id,
+        notes: req.body.notes || '',
+        subscriptionType: plan.subscriptionType || 'days',
+        sessionsLimit: isSessions ? (plan.sessionsLimit || 0) : 0,
+        sessionsUsed: 0,
+        status: 'active',
+      });
+    }
+
+    // Reactivate Member QR & account automatically
     member.active = true;
     member.isQrActive = true;
     await member.save();
@@ -248,13 +272,6 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
 
     // Skip notification for Day Pass (1 day duration)
     if (plan.durationInDays !== 1) {
-      // Check if member has previous subscriptions
-      const previousSubsCount = await Subscription.countDocuments({ 
-        member: memberId, 
-        _id: { $ne: subscription._id } 
-      });
-      const isRenewal = previousSubsCount > 0;
-
       // Send WhatsApp notification with QR link
       notifyPaymentSuccess(
         populated.member as any, 
