@@ -380,17 +380,29 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
       return res.status(403).json({ success: false, message: 'ليس لديك صلاحية الوصول لبيانات هذا الشفت' });
     }
 
-    const subscription = await Subscription.findOne({ member: id })
+    const now = new Date();
+
+    let subscription = await Subscription.findOne({ member: id })
       .populate('plan', 'name price')
       .sort({ endDate: -1 });
 
+    if (subscription && subscription.status === 'active') {
+      const isSessions = subscription.subscriptionType === 'sessions';
+      const hasSessionsExhausted = isSessions && subscription.sessionsLimit > 0 && (subscription.sessionsUsed || 0) >= subscription.sessionsLimit;
+      const isDateExpired = !isSessions && subscription.endDate < now;
+
+      if (hasSessionsExhausted || isDateExpired) {
+        subscription.status = 'expired';
+        await subscription.save();
+      }
+    }
+
     const subscriptionPayment = subscription ? await Payment.findOne({ subscription: subscription._id }) : null;
 
-    const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const attendanceCount = await Attendance.countDocuments({ member: id, date: { $gte: startOfMonth } });
 
-    const recentAttendance = await Attendance.find({ member: id }).sort({ checkInTime: -1 }).limit(10);
+    const recentAttendance = await Attendance.find({ member: id }).sort({ checkInTime: -1 }).limit(50);
 
     const payments = await Payment.find({ member: id }).sort({ paymentDate: -1 });
     const totalPaid = payments.reduce((s, p) => s + p.paidAmount, 0);
