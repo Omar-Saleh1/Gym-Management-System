@@ -386,14 +386,30 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
       .populate('plan', 'name price')
       .sort({ endDate: -1 });
 
-    if (subscription && subscription.status === 'active') {
-      const isSessions = subscription.subscriptionType === 'sessions';
-      const hasSessionsExhausted = isSessions && subscription.sessionsLimit > 0 && (subscription.sessionsUsed || 0) >= subscription.sessionsLimit;
-      const isDateExpired = !isSessions && subscription.endDate < now;
+    if (subscription) {
+      if (subscription.subscriptionType === 'sessions') {
+        // Sync sessionsUsed to actual Attendance documents count for current subscription
+        const actualVisitsCount = await Attendance.countDocuments({
+          member: id,
+          checkInTime: { $gte: subscription.startDate },
+        });
 
-      if (hasSessionsExhausted || isDateExpired) {
-        subscription.status = 'expired';
+        subscription.sessionsUsed = actualVisitsCount;
+
+        if (subscription.sessionsLimit > 0 && subscription.sessionsUsed >= subscription.sessionsLimit) {
+          subscription.status = 'expired';
+        } else if (subscription.status === 'expired' && (subscription.sessionsLimit === 0 || subscription.sessionsUsed < subscription.sessionsLimit)) {
+          if (!subscription.endDate || subscription.endDate >= now) {
+            subscription.status = 'active'; // Restore active status if sessions are remaining!
+          }
+        }
         await subscription.save();
+      } else if (subscription.status === 'active') {
+        const isDateExpired = subscription.endDate < now;
+        if (isDateExpired) {
+          subscription.status = 'expired';
+          await subscription.save();
+        }
       }
     }
 
