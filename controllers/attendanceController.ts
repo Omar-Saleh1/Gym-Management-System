@@ -381,46 +381,64 @@ export const getAttendance = async (req: Request, res: Response): Promise<any> =
 
     const records = await Attendance.find(query)
       .populate('member', 'name phone qrToken')
-      .sort({ checkInTime: -1 });
+      .sort({ checkInTime: -1 })
+      .lean();
 
-    const recordsWithStatus = await Promise.all(
-      records.map(async (r: any) => {
-        if (!r.member) return r;
-        const sub = await Subscription.findOne({ member: r.member._id }).sort({ endDate: -1 });
-        let membershipStatus = 'Expired';
-        let sessionInfo = null;
-        if (sub) {
-          const now = new Date();
-          const isSession = sub.subscriptionType === 'sessions';
-          const hasSessionsLeft = isSession && sub.sessionsLimit > 0 && (sub.sessionsUsed || 0) < sub.sessionsLimit;
-          const isDateValid = sub.endDate >= now;
-
-          if (sub.status === 'frozen') {
-            membershipStatus = 'Frozen';
-          } else if (sub.status === 'active' && (isSession ? hasSessionsLeft : isDateValid)) {
-            membershipStatus = 'Active';
-          } else {
-            membershipStatus = 'Expired';
-          }
-
-          if (isSession) {
-            sessionInfo = {
-              sessionsUsed: sub.sessionsUsed || 0,
-              sessionsLimit: sub.sessionsLimit,
-              sessionsRemaining: Math.max(0, sub.sessionsLimit - (sub.sessionsUsed || 0)),
-            };
-          }
-        }
-        const recordObj = r.toObject();
-        if (recordObj.member) {
-          recordObj.member.membershipStatus = membershipStatus;
-          if (sessionInfo) {
-            recordObj.member.sessionInfo = sessionInfo;
-          }
-        }
-        return recordObj;
-      })
+    // Batch fetch all latest subscriptions for unique member IDs (1 DB query instead of N queries)
+    const memberIds = Array.from(
+      new Set(records.map((r: any) => r.member?._id?.toString()).filter(Boolean))
     );
+
+    const subscriptions = memberIds.length > 0
+      ? await Subscription.find({ member: { $in: memberIds } }).sort({ endDate: -1 }).lean()
+      : [];
+
+    const subMap = new Map<string, any>();
+    for (const sub of subscriptions) {
+      const mId = sub.member?.toString();
+      if (mId && !subMap.has(mId)) {
+        subMap.set(mId, sub);
+      }
+    }
+
+    const now = new Date();
+    const recordsWithStatus = records.map((r: any) => {
+      if (!r.member) return r;
+      const mId = r.member._id?.toString();
+      const sub = subMap.get(mId);
+      let membershipStatus = 'Expired';
+      let sessionInfo = null;
+
+      if (sub) {
+        const isSession = sub.subscriptionType === 'sessions';
+        const hasSessionsLeft = isSession && sub.sessionsLimit > 0 && (sub.sessionsUsed || 0) < sub.sessionsLimit;
+        const isDateValid = sub.endDate && new Date(sub.endDate) >= now;
+
+        if (sub.status === 'frozen') {
+          membershipStatus = 'Frozen';
+        } else if (sub.status === 'active' && (isSession ? hasSessionsLeft : isDateValid)) {
+          membershipStatus = 'Active';
+        } else {
+          membershipStatus = 'Expired';
+        }
+
+        if (isSession) {
+          sessionInfo = {
+            sessionsUsed: sub.sessionsUsed || 0,
+            sessionsLimit: sub.sessionsLimit,
+            sessionsRemaining: Math.max(0, sub.sessionsLimit - (sub.sessionsUsed || 0)),
+          };
+        }
+      }
+
+      if (r.member) {
+        r.member.membershipStatus = membershipStatus;
+        if (sessionInfo) {
+          r.member.sessionInfo = sessionInfo;
+        }
+      }
+      return r;
+    });
 
     res.json(recordsWithStatus);
   } catch (err: any) {
