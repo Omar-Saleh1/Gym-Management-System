@@ -257,6 +257,7 @@ export const createSubscription = async (req: Request, res: Response): Promise<a
         amount: paidAmount,
         date: startDate,
         memberId,
+        shiftType: member.shiftType,
         subscriptionId: subscription._id,
         paymentId: payment._id,
         paymentMethod: paymentMethod || 'CASH',

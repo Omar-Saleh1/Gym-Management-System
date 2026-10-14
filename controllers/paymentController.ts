@@ -158,7 +158,7 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
 
     if (Object.keys(memberShiftFilter).length > 0) {
       hasMemberFilter = true;
-      const shiftMembers = await Member.find({ ...memberShiftFilter, active: true }).select('_id');
+      const shiftMembers = await Member.find({ ...memberShiftFilter }).select('_id');
       memberIds = shiftMembers.map(m => m._id);
     }
 
@@ -168,6 +168,7 @@ export const getRevenueDashboard = async (req: Request, res: Response): Promise<
         match.$or = [
           { memberId: { $in: memberIds } },
           { shiftType: cashier.shiftType },
+          ...(cashier?.id ? [{ createdBy: cashier.id }] : []),
         ];
       }
       return match;
