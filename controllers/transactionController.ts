@@ -5,14 +5,14 @@ import mongoose from 'mongoose';
 import { getShiftFilter, AuthCashier } from '../middleware/auth';
 import { getBusinessDayBounds, getBusinessMonthBounds, getBusinessDateString, getCairoNow } from '../utils/businessDay';
 
-// Cairo Date Helper to build UTC range bounds (with 04:00 AM business day cutoff)
+// Cairo Date Helper to build UTC range bounds (with 03:00 AM business day cutoff)
 const getCairoUtcRange = (range: string, from?: string, to?: string) => {
   if (range === 'today') {
     const { startUtc, endUtc } = getBusinessDayBounds();
     return { start: startUtc, end: endUtc };
   } else if (range === 'yesterday') {
     const cairoDate = getCairoNow();
-    cairoDate.setDate(cairoDate.getDate() - (cairoDate.getHours() < 4 ? 2 : 1));
+    cairoDate.setDate(cairoDate.getDate() - (cairoDate.getHours() < 3 ? 2 : 1));
     const yesterdayStr = `${cairoDate.getFullYear()}-${String(cairoDate.getMonth() + 1).padStart(2, '0')}-${String(cairoDate.getDate()).padStart(2, '0')}`;
     const { startUtc, endUtc } = getBusinessDayBounds(yesterdayStr);
     return { start: startUtc, end: endUtc };
