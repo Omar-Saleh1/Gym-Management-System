@@ -130,38 +130,42 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    // Verify active subscription (independent of any workout/diet plans)
+    // Verify active subscription (must have active status AND endDate >= now)
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      $or: [
-        { endDate: { $gte: now } },
-        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
-      ]
+      endDate: { $gte: now },
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
       // Mark any outdated active subs as expired
       await Subscription.updateMany(
-        { member: member._id, status: 'active', endDate: { $lt: now }, subscriptionType: { $ne: 'sessions' } },
+        { member: member._id, status: 'active', endDate: { $lt: now } },
         { status: 'expired' }
       );
+      // Auto-lock member QR code
+      member.isQrActive = false;
+      await member.save();
+
       return res.status(422).json({
         success: false,
-        message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.',
+        message: 'الاشتراك منتهي، يرجى تجديد الاشتراك أولاً لتفعيل الدخول.',
         requiresRenewal: true,
       });
     }
 
     // Session-based: check remaining sessions BEFORE recording attendance
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
-      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
-        // Exhausted — mark expired
+      if ((activeSub.sessionsUsed || 0) >= activeSub.sessionsLimit) {
+        // Exhausted — mark expired and lock QR
         activeSub.status = 'expired';
         await activeSub.save();
+        member.isQrActive = false;
+        await member.save();
+
         return res.status(422).json({
           success: false,
-          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          message: `انتهت جميع الحصص (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
           requiresRenewal: true,
         });
       }
@@ -195,9 +199,11 @@ export const scanQR = async (req: Request, res: Response): Promise<any> => {
     let sessionInfo: { sessionsUsed?: number; sessionsLimit?: number; sessionsRemaining?: number } = {};
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
       activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
-      // If this was the last session, expire automatically
+      // If this was the last session, expire automatically and lock QR
       if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
+        member.isQrActive = false;
+        await member.save();
       }
       await activeSub.save();
       sessionInfo = {
@@ -253,28 +259,33 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
       return res.status(422).json({ message: 'الاشتراك مجمد حالياً.' });
     }
 
-    // Check active subscription
+    // Check active subscription (must have active status AND endDate >= now)
     const now = new Date();
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      $or: [
-        { endDate: { $gte: now } },
-        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
-      ]
+      endDate: { $gte: now },
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
-      return res.status(422).json({ message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.', requiresRenewal: true });
+      await Subscription.updateMany(
+        { member: member._id, status: 'active', endDate: { $lt: now } },
+        { status: 'expired' }
+      );
+      member.isQrActive = false;
+      await member.save();
+      return res.status(422).json({ message: 'الاشتراك منتهي، يرجى تجديد الاشتراك أولاً.', requiresRenewal: true });
     }
 
     // Check session limits
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
-      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+      if ((activeSub.sessionsUsed || 0) >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
         await activeSub.save();
+        member.isQrActive = false;
+        await member.save();
         return res.status(422).json({
-          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          message: `انتهت جميع الحصص (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
           requiresRenewal: true,
         });
       }
@@ -303,6 +314,8 @@ export const checkIn = async (req: Request, res: Response): Promise<any> => {
       activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
       if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
+        member.isQrActive = false;
+        await member.save();
       }
       await activeSub.save();
       sessionInfo = {
@@ -560,23 +573,28 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      $or: [
-        { endDate: { $gte: now } },
-        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
-      ]
+      endDate: { $gte: now },
     }).sort({ endDate: -1 });
 
     if (!activeSub) {
-      return res.status(422).json({ success: false, message: 'الاشتراك منتهي، يرجى تجديد الاشتراك.', requiresRenewal: true });
+      await Subscription.updateMany(
+        { member: member._id, status: 'active', endDate: { $lt: now } },
+        { status: 'expired' }
+      );
+      member.isQrActive = false;
+      await member.save();
+      return res.status(422).json({ success: false, message: 'الاشتراك منتهي، يرجى تجديد الاشتراك أولاً.', requiresRenewal: true });
     }
 
     if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0) {
-      if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
+      if ((activeSub.sessionsUsed || 0) >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
         await activeSub.save();
+        member.isQrActive = false;
+        await member.save();
         return res.status(422).json({
           success: false,
-          message: `انتهت حصصك (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
+          message: `انتهت جميع الحصص (${activeSub.sessionsLimit}/${activeSub.sessionsLimit})، يرجى تجديد الاشتراك.`,
           requiresRenewal: true
         });
       }
@@ -610,6 +628,8 @@ export const checkInByQR = async (req: Request, res: Response): Promise<any> => 
       activeSub.sessionsUsed = (activeSub.sessionsUsed || 0) + 1;
       if (activeSub.sessionsUsed >= activeSub.sessionsLimit) {
         activeSub.status = 'expired';
+        member.isQrActive = false;
+        await member.save();
       }
       await activeSub.save();
     }

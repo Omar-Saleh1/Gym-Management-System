@@ -250,14 +250,11 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
     const now = new Date();
     // Check frozen first
     const frozenSub = await Subscription.findOne({ member: member._id, status: 'frozen' });
-    // Check active
+    // Check active (must have active status AND endDate >= now)
     const activeSub = await Subscription.findOne({
       member: member._id,
       status: 'active',
-      $or: [
-        { endDate: { $gte: now } },
-        { subscriptionType: 'sessions', $expr: { $lt: ['$sessionsUsed', '$sessionsLimit'] } }
-      ]
+      endDate: { $gte: now },
     }).sort({ endDate: -1 });
 
     const lastSub = await Subscription.findOne({ member: member._id }).sort({ endDate: -1 });
@@ -272,6 +269,12 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
     } else if (activeSub) {
       if (activeSub.subscriptionType === 'sessions' && activeSub.sessionsLimit > 0 && (activeSub.sessionsUsed || 0) >= activeSub.sessionsLimit) {
         membershipStatus = 'Expired';
+        activeSub.status = 'expired';
+        await activeSub.save();
+        if (member.isQrActive !== false) {
+          member.isQrActive = false;
+          await member.save();
+        }
       } else {
         membershipStatus = 'Active';
       }
@@ -284,9 +287,19 @@ export const getPublicMemberByToken = async (req: Request, res: Response): Promi
           sessionsRemaining: Math.max(0, activeSub.sessionsLimit - (activeSub.sessionsUsed || 0)),
         };
       }
-    } else if (lastSub) {
+    } else {
       membershipStatus = 'Expired';
-      endDate = lastSub.endDate;
+      if (lastSub) {
+        endDate = lastSub.endDate;
+        if (lastSub.status === 'active') {
+          lastSub.status = 'expired';
+          await lastSub.save();
+        }
+      }
+      if (member.isQrActive !== false) {
+        member.isQrActive = false;
+        await member.save();
+      }
     }
 
     res.json({
@@ -410,6 +423,11 @@ export const getMemberProfile = async (req: Request, res: Response): Promise<any
           subscription.status = 'expired';
           await subscription.save();
         }
+      }
+
+      if (subscription.status === 'expired' && member.isQrActive !== false) {
+        member.isQrActive = false;
+        await member.save();
       }
     }
 
