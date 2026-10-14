@@ -68,8 +68,15 @@ export async function initWhatsAppClient() {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         console.log('[WhatsApp] Connection closed. Status code:', statusCode);
 
-        // Do NOT wipe MongoDB auth state automatically on server restarts or socket drops!
-        // Always attempt reconnect after 5 seconds using saved MongoDB auth state.
+        if (statusCode === DisconnectReason.loggedOut) {
+          // WhatsApp server explicitly rejected our session (401).
+          // Clear stale credentials so next init shows a fresh QR code.
+          console.log('[WhatsApp] Logged out by server. Clearing MongoDB auth state...');
+          await AuthModel.deleteMany({ sessionId: 'gym-system' }).catch(console.error);
+        }
+
+        // Always attempt reconnect after 5 seconds.
+        // If credentials were cleared above, initWhatsAppClient will generate a new QR.
         setTimeout(initWhatsAppClient, 5000);
       }
 
